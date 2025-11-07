@@ -1,5 +1,4 @@
-
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Box,
   Button,
@@ -11,30 +10,58 @@ import {
   Typography,
   IconButton,
   useMediaQuery,
+  MenuItem,
+  Select,
+  FormControl,
+  InputLabel,
+  CircularProgress,
 } from "@mui/material";
 import { DataGrid } from "@mui/x-data-grid";
 import { Edit, Delete } from "@mui/icons-material";
 import { useTheme } from "@mui/material/styles";
+import AdminService from "../services/AdminService";
 
-const Users = () => {
-  const [users, setUsers] = useState([
-    { id: 1, name: "John Doe", phone: "9876543210" },
-    { id: 2, name: "Jane Smith", phone: "9123456780" },
-  ]);
-
+const Parties = () => {
+  const [users, setUsers] = useState([]);
+  const [loading, setLoading] = useState(true); // For loader
   const [open, setOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
-  const [formData, setFormData] = useState({ id: null, name: "", phone: "" });
+  const [formData, setFormData] = useState({
+    id: null,
+    name: "",
+    phone: "",
+    email: "",
+    role: "",
+  });
 
   const theme = useTheme();
   const fullScreen = useMediaQuery(theme.breakpoints.down("sm"));
 
+  // ✅ Fetch Users on component mount
+  useEffect(() => {
+    loadUsers();
+  }, []);
+
+  const loadUsers = async () => {
+    setLoading(true);
+    try {
+      const data = await AdminService.getUsers();
+      setUsers(data || []);
+    } catch (error) {
+      console.error("Failed to fetch users:", error);
+      alert("Unable to load users. Please check your connection or token.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Modal open/close
   const handleOpen = (user = null) => {
     if (user) {
       setFormData(user);
       setIsEditing(true);
     } else {
-      setFormData({ id: null, name: "", phone: "" });
+      setFormData({ id: null, name: "", phone: "", email: "", role: "" });
       setIsEditing(false);
     }
     setOpen(true);
@@ -42,16 +69,17 @@ const Users = () => {
 
   const handleClose = () => {
     setOpen(false);
-    setFormData({ id: null, name: "", phone: "" });
+    setFormData({ id: null, name: "", phone: "", email: "", role: "" });
   };
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
+  // Save or Update User (for now, local state)
   const handleSave = () => {
-    if (!formData.name || !formData.phone)
-      return alert("Please fill out all fields.");
+    if (!formData.name || !formData.phone || !formData.role)
+      return alert("Please fill all fields including role.");
 
     if (isEditing) {
       setUsers(users.map((u) => (u.id === formData.id ? formData : u)));
@@ -67,9 +95,21 @@ const Users = () => {
     }
   };
 
+  // Table Columns
   const columns = [
     { field: "name", headerName: "Name", flex: 1 },
     { field: "phone", headerName: "Phone Number", flex: 1 },
+    { field: "email", headerName: "Email", flex: 1 },
+    {
+      field: "role",
+      headerName: "Role",
+      flex: 1,
+      renderCell: (params) => (
+        <Typography sx={{ textTransform: "capitalize", fontWeight: 500 }}>
+          {params.value}
+        </Typography>
+      ),
+    },
     {
       field: "actions",
       headerName: "Actions",
@@ -99,40 +139,39 @@ const Users = () => {
         </Button>
       </Box>
 
-      <div style={{ height: 420, width: "100%" }}>
-        <DataGrid
-          rows={users}
-          columns={columns}
-          pageSize={5}
-          rowsPerPageOptions={[5]}
-          disableRowSelectionOnClick
-          sx={{ borderRadius: 2, boxShadow: 2 }}
-        />
-      </div>
+      {/* ✅ Loader while fetching users */}
+      {loading ? (
+        <Box display="flex" justifyContent="center" alignItems="center" height={300}>
+          <CircularProgress />
+        </Box>
+      ) : (
+        <div style={{ height: 420, width: "100%" }}>
+          <DataGrid
+            rows={users}
+            columns={columns}
+            pageSize={5}
+            rowsPerPageOptions={[5]}
+            disableRowSelectionOnClick
+            sx={{ borderRadius: 2, boxShadow: 2 }}
+          />
+        </div>
+      )}
 
-      {/* Form Dialog */}
+      {/* Add/Edit Dialog */}
       <Dialog
         open={open}
         onClose={handleClose}
         fullScreen={fullScreen}
         maxWidth="sm"
         fullWidth
-        PaperProps={{
-          sx: { borderRadius: 3, p: 1.5 },
-        }}
+        PaperProps={{ sx: { borderRadius: 3, p: 1.5 } }}
       >
         <DialogTitle sx={{ fontWeight: "bold" }}>
           {isEditing ? "Edit User" : "Add New User"}
         </DialogTitle>
 
         <DialogContent dividers>
-          <Box
-            component="form"
-            display="flex"
-            flexDirection="column"
-            gap={3}
-            mt={1}
-          >
+          <Box component="form" display="flex" flexDirection="column" gap={3} mt={1}>
             <TextField
               label="Full Name"
               name="name"
@@ -152,6 +191,29 @@ const Users = () => {
               variant="outlined"
               required
             />
+
+            <TextField
+              label="Email"
+              name="email"
+              value={formData.email}
+              onChange={handleChange}
+              fullWidth
+              variant="outlined"
+              required
+            />
+
+            <FormControl fullWidth required>
+              <InputLabel>Role</InputLabel>
+              <Select
+                name="role"
+                value={formData.role}
+                onChange={handleChange}
+                label="Role"
+              >
+                <MenuItem value="admin">Admin</MenuItem>
+                <MenuItem value="employee">Employee</MenuItem>
+              </Select>
+            </FormControl>
           </Box>
         </DialogContent>
 
@@ -166,4 +228,4 @@ const Users = () => {
   );
 };
 
-export default Users;
+export default Parties;
