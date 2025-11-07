@@ -15,10 +15,9 @@ export default function Layout({ role }) {
         { text: "Transactions", path: "/transactions" },
         { text: "Payments", path: "/payments" },
         { text: "Parties", path: "/parties" },
-        { text: "Users", path: "/users" },
       ]
     : [
-        { text: "Dashboard", path: "/" },
+        { text: "Dashboard", path: "/dashboard" },
         { text: "Transactions", path: "/transactions" },
       ];
 
