@@ -1,5 +1,5 @@
 import React from "react";
-import { Outlet, Link, useNavigate } from "react-router-dom";
+import { Outlet, useNavigate } from "react-router-dom";
 import { Drawer, List, ListItem, ListItemText, AppBar, Toolbar, Button, Box } from "@mui/material";
 
 const drawerWidth = 200;
