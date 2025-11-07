@@ -13,7 +13,7 @@ const MainLayout = ({ role, onLogout }) => {
   ];
 
   if (role === "admin") {
-    menuItems.push({ text: "Users", path: "/users" });
+    menuItems.push({ text: "Users", path: "/Parties" });
   }
 
   return (

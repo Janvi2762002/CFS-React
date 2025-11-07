@@ -1,94 +1,164 @@
+
 import React, { useState } from "react";
 import {
-  Box, Typography, Button, Dialog, DialogTitle,
-  DialogContent, DialogActions, TextField
+  Box,
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  TextField,
+  Typography,
+  IconButton,
+  useMediaQuery,
 } from "@mui/material";
 import { DataGrid } from "@mui/x-data-grid";
+import { Edit, Delete } from "@mui/icons-material";
+import { useTheme } from "@mui/material/styles";
 
 const Users = () => {
   const [users, setUsers] = useState([
     { id: 1, name: "John Doe", phone: "9876543210" },
-    { id: 2, name: "Jane Smith", phone: "8765432109" },
+    { id: 2, name: "Jane Smith", phone: "9123456780" },
   ]);
 
   const [open, setOpen] = useState(false);
-  const [editUser, setEditUser] = useState(null);
-  const [form, setForm] = useState({ name: "", phone: "" });
+  const [isEditing, setIsEditing] = useState(false);
+  const [formData, setFormData] = useState({ id: null, name: "", phone: "" });
+
+  const theme = useTheme();
+  const fullScreen = useMediaQuery(theme.breakpoints.down("sm"));
 
   const handleOpen = (user = null) => {
-    setEditUser(user);
-    setForm(user || { name: "", phone: "" });
+    if (user) {
+      setFormData(user);
+      setIsEditing(true);
+    } else {
+      setFormData({ id: null, name: "", phone: "" });
+      setIsEditing(false);
+    }
     setOpen(true);
   };
 
   const handleClose = () => {
-    setForm({ name: "", phone: "" });
-    setEditUser(null);
     setOpen(false);
+    setFormData({ id: null, name: "", phone: "" });
   };
 
-  const handleSubmit = () => {
-    if (editUser) {
-      setUsers(users.map(u => (u.id === editUser.id ? { ...u, ...form } : u)));
+  const handleChange = (e) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const handleSave = () => {
+    if (!formData.name || !formData.phone)
+      return alert("Please fill out all fields.");
+
+    if (isEditing) {
+      setUsers(users.map((u) => (u.id === formData.id ? formData : u)));
     } else {
-      setUsers([...users, { id: Date.now(), ...form }]);
+      setUsers([...users, { ...formData, id: Date.now() }]);
     }
     handleClose();
   };
 
-  const handleDelete = (id) => setUsers(users.filter(u => u.id !== id));
+  const handleDelete = (id) => {
+    if (window.confirm("Are you sure you want to delete this user?")) {
+      setUsers(users.filter((u) => u.id !== id));
+    }
+  };
 
   const columns = [
     { field: "name", headerName: "Name", flex: 1 },
-    { field: "phone", headerName: "Phone", flex: 1 },
+    { field: "phone", headerName: "Phone Number", flex: 1 },
     {
       field: "actions",
       headerName: "Actions",
+      width: 150,
+      sortable: false,
       renderCell: (params) => (
-        <Box>
-          <Button size="small" onClick={() => handleOpen(params.row)}>Edit</Button>
-          <Button size="small" color="error" onClick={() => handleDelete(params.row.id)}>
-            Delete
-          </Button>
-        </Box>
+        <>
+          <IconButton color="primary" onClick={() => handleOpen(params.row)}>
+            <Edit />
+          </IconButton>
+          <IconButton color="error" onClick={() => handleDelete(params.row.id)}>
+            <Delete />
+          </IconButton>
+        </>
       ),
     },
   ];
 
   return (
-    <Box>
-      <Typography variant="h5" gutterBottom>
-        Manage Users
-      </Typography>
-      <Button variant="contained" sx={{ mb: 2 }} onClick={() => handleOpen()}>
-        Add User
-      </Button>
-      <div style={{ height: 400, width: "100%" }}>
-        <DataGrid rows={users} columns={columns} pageSize={5} />
+    <Box sx={{ p: 3 }}>
+      <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+        <Typography variant="h5" fontWeight="bold">
+          User Management
+        </Typography>
+        <Button variant="contained" onClick={() => handleOpen()}>
+          Add User
+        </Button>
+      </Box>
+
+      <div style={{ height: 420, width: "100%" }}>
+        <DataGrid
+          rows={users}
+          columns={columns}
+          pageSize={5}
+          rowsPerPageOptions={[5]}
+          disableRowSelectionOnClick
+          sx={{ borderRadius: 2, boxShadow: 2 }}
+        />
       </div>
 
-      <Dialog open={open} onClose={handleClose} maxWidth="xs" fullWidth>
-        <DialogTitle>{editUser ? "Edit User" : "Add User"}</DialogTitle>
-        <DialogContent>
-          <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 1 }}>
+      {/* Form Dialog */}
+      <Dialog
+        open={open}
+        onClose={handleClose}
+        fullScreen={fullScreen}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: { borderRadius: 3, p: 1.5 },
+        }}
+      >
+        <DialogTitle sx={{ fontWeight: "bold" }}>
+          {isEditing ? "Edit User" : "Add New User"}
+        </DialogTitle>
+
+        <DialogContent dividers>
+          <Box
+            component="form"
+            display="flex"
+            flexDirection="column"
+            gap={3}
+            mt={1}
+          >
             <TextField
-              label="Name"
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
+              label="Full Name"
+              name="name"
+              value={formData.name}
+              onChange={handleChange}
               fullWidth
+              variant="outlined"
+              required
             />
+
             <TextField
               label="Phone Number"
-              value={form.phone}
-              onChange={(e) => setForm({ ...form, phone: e.target.value })}
+              name="phone"
+              value={formData.phone}
+              onChange={handleChange}
               fullWidth
+              variant="outlined"
+              required
             />
           </Box>
         </DialogContent>
-        <DialogActions>
+
+        <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={handleClose}>Cancel</Button>
-          <Button variant="contained" onClick={handleSubmit}>
-            {editUser ? "Update" : "Add"}
+          <Button variant="contained" onClick={handleSave}>
+            {isEditing ? "Update User" : "Add User"}
           </Button>
         </DialogActions>
       </Dialog>
