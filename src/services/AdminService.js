@@ -73,4 +73,4 @@ class AdminService {
 }
 
 // Export single instance
-export default new AdminService();
+export default AdminService
