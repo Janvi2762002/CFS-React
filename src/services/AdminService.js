@@ -4,7 +4,7 @@ import axios from "axios";
 
 class AdminService {
   // Note: Use relative URLs for proxy
- // API_BASE_URL = process.env.REACT_APP_API_BASE_URL || "";
+  // API_BASE_URL = process.env.REACT_APP_API_BASE_URL || "";
   API_BASE_URL = process.env.REACT_APP_API_BASE_URL || "";
 
 
@@ -40,7 +40,7 @@ class AdminService {
     }
   }
 
-  // Create or update a user
+// update a user
   async saveUser(user) {
     try {
       if (user.id) {
@@ -51,21 +51,13 @@ class AdminService {
           { headers: { "Content-Type": "application/json" } }
         );
         return response.data;
-      } else {
-        // Create new user
-        const response = await axios.post(
-          `${this.API_BASE_URL}/Users`,
-          user,
-          { headers: { "Content-Type": "application/json" } }
-        );
-        return response.data;
-      }
-    } catch (error) {
+    } 
+  }
+  catch (error) {
       console.error("Error saving user:", error);
       throw error;
     }
   }
-
   // Delete a user
   async deleteUser(userId) {
     try {

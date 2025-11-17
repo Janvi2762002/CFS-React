@@ -23,21 +23,25 @@ import AdminService from "../services/AdminService";
 
 const Parties = () => {
   const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(true); // For loader
+  const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+
   const [formData, setFormData] = useState({
-    id: null,
-    name: "",
-    phone: "",
-    email: "",
+    id: null, // only used for edit
+    username: "",
+    password: "",
+    phoneNumber: "",
+    fullName: "",
+    nickName: "",
+    additionalInfo: "",
     role: "",
   });
 
   const theme = useTheme();
   const fullScreen = useMediaQuery(theme.breakpoints.down("sm"));
 
-  // ✅ Fetch Users on component mount
+  // Load Users
   useEffect(() => {
     loadUsers();
   }, []);
@@ -46,69 +50,88 @@ const Parties = () => {
     setLoading(true);
     try {
       const data = await AdminService.getUsers();
-      setUsers(data || []);
+      setUsers(data.resultObject || []);
     } catch (error) {
       console.error("Failed to fetch users:", error);
-      alert("Unable to load users. Please check your connection or token.");
+      alert("Unable to load users.");
     } finally {
       setLoading(false);
     }
   };
 
-  // Modal open/close
+  // Open modal
   const handleOpen = (user = null) => {
     if (user) {
-      setFormData(user);
+      setFormData({
+        id: user.id,
+        username: user.username || "",
+        password: "", 
+        phoneNumber: user.phoneNumber || "",
+        fullName: user.fullName || "",
+        nickName: user.nickName || "",
+        additionalInfo: user.additionalInfo || "",
+        role: user.role || "",
+      });
       setIsEditing(true);
     } else {
-      setFormData({ id: null, name: "", phone: "", email: "", role: "" });
+      setFormData({
+        id: null,
+        username: "",
+        password: "",
+        phoneNumber: "",
+        fullName: "",
+        nickName: "",
+        additionalInfo: "",
+        role: "",
+      });
       setIsEditing(false);
     }
     setOpen(true);
   };
 
-  const handleClose = () => {
-    setOpen(false);
-    setFormData({ id: null, name: "", phone: "", email: "", role: "" });
-  };
+  const handleClose = () => setOpen(false);
 
-  const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-  };
+  const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
-  // Save or Update User (for now, local state)
-  const handleSave = () => {
-    if (!formData.name || !formData.phone || !formData.role)
-      return alert("Please fill all fields including role.");
-
-    if (isEditing) {
-      setUsers(users.map((u) => (u.id === formData.id ? formData : u)));
-    } else {
-      setUsers([...users, { ...formData, id: Date.now() }]);
+  const handleSave = async () => {
+    if (!formData.username || !formData.phoneNumber || !formData.fullName || !formData.nickName || !formData.role) {
+      return alert("Please fill all required fields.");
     }
-    handleClose();
+
+    const payload = isEditing ? formData : { ...formData, id: undefined };
+
+    try {
+      await AdminService.saveUser(payload);
+      await loadUsers();
+      handleClose();
+    } catch (error) {
+      console.error("Failed to save user:", error);
+      alert("Unable to save user.");
+    }
   };
 
-  const handleDelete = (id) => {
-    if (window.confirm("Are you sure you want to delete this user?")) {
+  const handleDelete = async (id) => {
+    if (!window.confirm("Delete this user?")) return;
+    try {
+      await AdminService.deleteUser(id);
       setUsers(users.filter((u) => u.id !== id));
+    } catch (err) {
+      console.error(err);
+      alert("Failed to delete user.");
     }
   };
 
-  // Table Columns
   const columns = [
-    { field: "name", headerName: "Name", flex: 1 },
-    { field: "phone", headerName: "Phone Number", flex: 1 },
-    { field: "email", headerName: "Email", flex: 1 },
+    { field: "username", headerName: "Username", flex: 1 },
+    { field: "phoneNumber", headerName: "Phone Number", flex: 1 },
+    { field: "fullName", headerName: "Full Name", flex: 1 },
+    { field: "nickName", headerName: "Nick Name", flex: 1 },
+    { field: "additionalInfo", headerName: "Additional Info", flex: 1 },
     {
       field: "role",
       headerName: "Role",
       flex: 1,
-      renderCell: (params) => (
-        <Typography sx={{ textTransform: "capitalize", fontWeight: 500 }}>
-          {params.value}
-        </Typography>
-      ),
+      renderCell: (params) => <Typography sx={{ textTransform: "capitalize", fontWeight: 100 }}>{params.value}</Typography>,
     },
     {
       field: "actions",
@@ -139,84 +162,35 @@ const Parties = () => {
         </Button>
       </Box>
 
-      {/* ✅ Loader while fetching users */}
       {loading ? (
         <Box display="flex" justifyContent="center" alignItems="center" height={300}>
           <CircularProgress />
         </Box>
       ) : (
         <div style={{ height: 420, width: "100%" }}>
-          <DataGrid
-            rows={users}
-            columns={columns}
-            pageSize={5}
-            rowsPerPageOptions={[5]}
-            disableRowSelectionOnClick
-            sx={{ borderRadius: 2, boxShadow: 2 }}
-          />
+          <DataGrid rows={users} columns={columns} pageSize={5} disableRowSelectionOnClick getRowId={(row) => row.id} />
         </div>
       )}
 
-      {/* Add/Edit Dialog */}
-      <Dialog
-        open={open}
-        onClose={handleClose}
-        fullScreen={fullScreen}
-        maxWidth="sm"
-        fullWidth
-        PaperProps={{ sx: { borderRadius: 3, p: 1.5 } }}
-      >
-        <DialogTitle sx={{ fontWeight: "bold" }}>
-          {isEditing ? "Edit User" : "Add New User"}
-        </DialogTitle>
-
+      <Dialog open={open} onClose={handleClose} fullScreen={fullScreen} maxWidth="sm" fullWidth PaperProps={{ sx: { borderRadius: 3, p: 1.5 } }}>
+        <DialogTitle sx={{ fontWeight: "bold" }}>{isEditing ? "Edit User" : "Add New User"}</DialogTitle>
         <DialogContent dividers>
-          <Box component="form" display="flex" flexDirection="column" gap={3} mt={1}>
-            <TextField
-              label="Full Name"
-              name="name"
-              value={formData.name}
-              onChange={handleChange}
-              fullWidth
-              variant="outlined"
-              required
-            />
-
-            <TextField
-              label="Phone Number"
-              name="phone"
-              value={formData.phone}
-              onChange={handleChange}
-              fullWidth
-              variant="outlined"
-              required
-            />
-
-            <TextField
-              label="Email"
-              name="email"
-              value={formData.email}
-              onChange={handleChange}
-              fullWidth
-              variant="outlined"
-              required
-            />
-
+          <Box display="flex" flexDirection="column" gap={3} mt={1}>
+            <TextField label="Username" name="username" value={formData.username} onChange={handleChange} required fullWidth />
+            <TextField label="Password" name="password" value={formData.password} onChange={handleChange} fullWidth />
+            <TextField label="Full Name" name="fullName" value={formData.fullName} onChange={handleChange} required fullWidth />
+            <TextField label="Nick Name" name="nickName" value={formData.nickName} onChange={handleChange} required fullWidth />
+            <TextField label="Phone Number" name="phoneNumber" value={formData.phoneNumber} onChange={handleChange} required fullWidth />
+            <TextField label="Additional Info" name="additionalInfo" value={formData.additionalInfo} onChange={handleChange} fullWidth />
             <FormControl fullWidth required>
               <InputLabel>Role</InputLabel>
-              <Select
-                name="role"
-                value={formData.role}
-                onChange={handleChange}
-                label="Role"
-              >
+              <Select name="role" value={formData.role} onChange={handleChange} label="Role">
                 <MenuItem value="admin">Admin</MenuItem>
                 <MenuItem value="employee">Employee</MenuItem>
               </Select>
             </FormControl>
           </Box>
         </DialogContent>
-
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={handleClose}>Cancel</Button>
           <Button variant="contained" onClick={handleSave}>
