@@ -110,6 +110,29 @@ const Parties = () => {
     }
   };
 
+  const handleUpdate = async () => {
+    try {
+      // const now = new Date().toISOString();
+
+      const { id, ...rest } = formData;
+
+      const payload = {
+        ...rest,
+        // updatedat: now,
+        id
+      };
+
+      await AdminService.updateUser(id, payload);
+
+      loadUsers();
+      handleClose();
+    } catch (err) {
+      console.error(err);
+      alert("Failed to update record.");
+    }
+  };
+
+
   const handleDelete = async (id) => {
     if (!window.confirm("Delete this user?")) return;
     try {
@@ -127,12 +150,17 @@ const Parties = () => {
     { field: "fullName", headerName: "Full Name", flex: 1 },
     { field: "nickName", headerName: "Nick Name", flex: 1 },
     { field: "additionalInfo", headerName: "Additional Info", flex: 1 },
+  
     {
       field: "role",
       headerName: "Role",
       flex: 1,
-      renderCell: (params) => <Typography sx={{ textTransform: "capitalize", fontWeight: 100 }}>{params.value}</Typography>,
+      valueFormatter: (params) =>
+        params
+          ? params.charAt(0).toUpperCase() + params.slice(1)
+          : "",
     },
+  
     {
       field: "actions",
       headerName: "Actions",
@@ -150,6 +178,7 @@ const Parties = () => {
       ),
     },
   ];
+  
 
   return (
     <Box sx={{ p: 3 }}>
@@ -193,7 +222,7 @@ const Parties = () => {
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={handleClose}>Cancel</Button>
-          <Button variant="contained" onClick={handleSave}>
+          <Button variant="contained" onClick={isEditing? handleUpdate :handleSave}>
             {isEditing ? "Update User" : "Add User"}
           </Button>
         </DialogActions>
