@@ -7,6 +7,7 @@ import Dashboard from "./pages/Dashboard";
 import Transactions from "./pages/Transactions";
 import Parties from "./pages/Parties";
 import AccessDenied from "./pages/AccessDenied";
+import Payments from "./pages/Payments";
 
 function App() {
   return (
@@ -28,11 +29,12 @@ function AppRoutes() {
       <Route path="/login" element={<LoginPage onLogin={handleLogin} />} />
       <Route path="/access-denied" element={<AccessDenied />} />
 
-      {userRole === "admin" || userRole === "employee" ? (
+      {userRole === "admin" || userRole === "employee" || userRole === "master" ? (
         <Route element={<MainLayout role={userRole} onLogout={handleLogout} />}>
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/transactions" element={<Transactions />} />
           {userRole === "admin" && <Route path="/parties" element={<Parties />} />}
+          {userRole === "master" && <Route path="/payments" element={<Payments />} /> }
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Route>
       ) : (

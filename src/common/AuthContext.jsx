@@ -21,7 +21,11 @@ export const AuthProvider = ({ children }) => {
   }, [userRole]);
 
   const handleLogin = (email, password) => {
-    if (email === "admin@example.com" && password === "Admin123") {
+    if(email=== "master" && password ==="master123"){
+      setUserRole("master");
+      navigate("/dashboard");
+    }
+    else if (email === "admin@example.com" && password === "Admin123") {
       setUserRole("admin");
       navigate("/dashboard");
     } else if (email === "employee@example.com" && password === "Emp123") {

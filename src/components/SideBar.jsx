@@ -9,12 +9,18 @@ export default function Layout({ role }) {
     navigate("/login");
   };
 
-  const menuItems = role === "admin"
+  const menuItems =
+  role === "admin"
     ? [
         { text: "Dashboard", path: "/" },
         { text: "Transactions", path: "/transactions" },
-        { text: "Payments", path: "/payments" },
-        { text: "Parties", path: "/parties" },
+        { text: "Payments", path: "/payments" },  
+      ]
+  : role === "master"
+    ? [
+        { text: "Dashboard", path: "/" },
+        { text: "Transactions", path: "/transactions" },
+        { text: "Parties", path: "/parties" },    // Admin sees Parties but no Payments
       ]
     : [
         { text: "Dashboard", path: "/dashboard" },

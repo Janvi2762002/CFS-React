@@ -12,8 +12,14 @@ const MainLayout = ({ role, onLogout }) => {
     { text: "Transactions", path: "/transactions" },
   ];
 
+  // Admin sees Users (Parties)
   if (role === "admin") {
-    menuItems.push({ text: "Users", path: "/Parties" });
+    menuItems.push({ text: "Users", path: "/parties" });
+  }
+
+  // Master sees Payments
+  if (role === "master") {
+    menuItems.push({ text: "Payments", path: "/payments" });
   }
 
   return (
@@ -46,6 +52,7 @@ const MainLayout = ({ role, onLogout }) => {
             <Button color="inherit" onClick={onLogout}>Logout</Button>
           </Toolbar>
         </AppBar>
+
         <Toolbar />
         <Outlet />
       </Box>
