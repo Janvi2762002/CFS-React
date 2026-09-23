@@ -1,63 +1,85 @@
-import React from "react";
-import { Outlet, useNavigate } from "react-router-dom";
-import { Drawer, List, ListItem, ListItemText, AppBar, Toolbar, Button, Box } from "@mui/material";
+import React, { useState } from "react";
+import { Outlet } from "react-router-dom";
+import { Box, Drawer } from "@mui/material";
+import Sidebar from "./parts/Sidebar";
+import Topbar from "./parts/Topbar";
+import { SIDEBAR_WIDTH, SIDEBAR_WIDTH_COLLAPSED } from "../theme/theme";
 
-const drawerWidth = 200;
+export default function MainLayout() {
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
 
-const MainLayout = ({ role, onLogout }) => {
-  const navigate = useNavigate();
-
-  const menuItems = [
-    { text: "Dashboard", path: "/dashboard" },
-    { text: "Transactions", path: "/transactions" },
-  ];
-
-  // Admin sees Users (Parties)
-  if (role === "admin") {
-    menuItems.push({ text: "Users", path: "/parties" });
-  }
-
-  // Master sees Payments
-  if (role === "master") {
-    menuItems.push({ text: "Payments", path: "/payments" });
-  }
+  const desktopWidth = collapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH;
 
   return (
-    <Box sx={{ display: "flex" }}>
-      {/* Sidebar */}
-      <Drawer
-        sx={{
-          width: drawerWidth,
-          flexShrink: 0,
-          "& .MuiDrawer-paper": { width: drawerWidth, boxSizing: "border-box" },
-        }}
-        variant="permanent"
-        anchor="left"
+    <Box sx={{ display: "flex", minHeight: "100vh", bgcolor: "background.default" }}>
+
+      {/* ── Left Sidebar Navigation ──────────────────────────────────── */}
+      <Box
+        component="nav"
+        sx={{ width: { md: desktopWidth }, flexShrink: { md: 0 } }}
       >
-        <Toolbar />
-        <List>
-          {menuItems.map((item) => (
-            <ListItem button key={item.text} onClick={() => navigate(item.path)}>
-              <ListItemText primary={item.text} />
-            </ListItem>
-          ))}
-        </List>
-      </Drawer>
+        {/* Mobile Temporary Drawer (< 900px) */}
+        <Drawer
+          variant="temporary"
+          open={mobileOpen}
+          onClose={() => setMobileOpen(false)}
+          ModalProps={{ keepMounted: true }}
+          sx={{
+            display: { xs: "block", md: "none" },
+            "& .MuiDrawer-paper": { width: SIDEBAR_WIDTH },
+          }}
+        >
+          <Sidebar onNavigate={() => setMobileOpen(false)} />
+        </Drawer>
 
-      {/* Main Content */}
-      <Box component="main" sx={{ flexGrow: 1, p: 3 }}>
-        <AppBar position="fixed" sx={{ zIndex: 1201 }}>
-          <Toolbar>
-            <Box sx={{ flexGrow: 1 }}>Welcome, {role}</Box>
-            <Button color="inherit" onClick={onLogout}>Logout</Button>
-          </Toolbar>
-        </AppBar>
+        {/* Desktop Permanent Collapsible Sidebar (>= 900px) */}
+        <Drawer
+          variant="permanent"
+          open
+          sx={{
+            display: { xs: "none", md: "block" },
+            "& .MuiDrawer-paper": {
+              width: desktopWidth,
+              borderRight: "none",
+              overflowX: "hidden",
+            },
+          }}
+        >
+          <Sidebar collapsed={collapsed} />
+        </Drawer>
+      </Box>
 
-        <Toolbar />
-        <Outlet />
+      {/* ── Main View Container ─────────────────────────────────────── */}
+      <Box
+        sx={{
+          flexGrow: 1,
+          display: "flex",
+          flexDirection: "column",
+          minWidth: 0,
+          minHeight: "100vh",
+        }}
+      >
+        <Topbar
+          collapsed={collapsed}
+          onToggleSidebar={() => setCollapsed((prev) => !prev)}
+          onToggleMobile={() => setMobileOpen(true)}
+        />
+
+        <Box
+          component="main"
+          sx={{
+            flexGrow: 1,
+            px: { xs: 2, sm: 3 },
+            py: 3,
+            width: "100%",
+            maxWidth: 1440,
+            mx: "auto",
+          }}
+        >
+          <Outlet />
+        </Box>
       </Box>
     </Box>
   );
-};
-
-export default MainLayout;
+}

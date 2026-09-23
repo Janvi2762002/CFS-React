@@ -1,412 +1,370 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef, useMemo } from "react";
 import { DataGrid } from "@mui/x-data-grid";
 import {
-  Typography,
-  Box,
-  TextField,
-  Button,
-  CircularProgress,
-  IconButton,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  Checkbox,
-  useMediaQuery
+  Typography, Box, TextField, Button, CircularProgress, IconButton,
+  Dialog, DialogActions, DialogContent, DialogTitle, Checkbox, FormControlLabel,
+  useMediaQuery, Stack, Chip, InputAdornment, Tooltip, Paper, Divider,
+  MenuItem, Grid, Alert,
 } from "@mui/material";
 import { Edit, Delete } from "@mui/icons-material";
+import SearchIcon from "@mui/icons-material/SearchOutlined";
+import AddIcon from "@mui/icons-material/Add";
+import DownloadIcon from "@mui/icons-material/FileDownloadOutlined";
+import UploadIcon from "@mui/icons-material/FileUploadOutlined";
+import ClearIcon from "@mui/icons-material/Clear";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 import AdminService from "../services/AdminService";
+import { useAuth } from "../common/AuthContext";
 
+const STATUS_FILTERS = [
+  { id: "all",     label: "All statuses" },
+  { id: "used",    label: "Limit used" },
+  { id: "pending", label: "Pending" },
+];
+
+/* ─── Main Component ─────────────────────────────────────────────────────── */
 export default function Transactions() {
-  const [rows, setRows] = useState([]);
-  const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(true);
-  const fileInputRef = React.useRef();
-  // --- Dialog States ---
-  const [open, setOpen] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
-  const [formData, setFormData] = useState({});
-  const fullScreen = useMediaQuery("(max-width:600px)");
+  const { userRole } = useAuth();
+  const canEdit = userRole === "master" || userRole === "admin";
 
-  // Fetch backend data
+  const [rows,         setRows]         = useState([]);
+  const [search,       setSearch]       = useState("");
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [loading,      setLoading]      = useState(true);
+  const [open,         setOpen]         = useState(false);
+  const [isEditing,    setIsEditing]    = useState(false);
+  const [formData,     setFormData]     = useState({});
+  const [saving,       setSaving]       = useState(false);
+  const [error,        setError]        = useState("");
+  const fileInputRef = useRef();
+  const isMobile = useMediaQuery("(max-width:768px)");
+
   const fetchData = async () => {
     setLoading(true);
+    setError("");
     try {
-      const data = await AdminService.getCardInfo();
-      setRows(data.resultObject || []);
-    } catch (error) {
-      console.error("Failed to fetch:", error);
-      alert("Unable to load data.");
-    } finally {
-      setLoading(false);
-    }
+      setRows(await AdminService.getCardInfo());
+    } catch (e) {
+      setRows([]);
+      setError(e?.message || "Could not load card swipes.");
+    } finally { setLoading(false); }
   };
 
-  useEffect(() => {
-    fetchData();
-  }, []);
+  useEffect(() => { fetchData(); }, []);
 
-  // OPEN modal
   const handleOpen = (row = null) => {
-    if (row) {
-      setFormData(row);
-      setIsEditing(true);
-    } else {
-      setFormData({
-        date: "",
-        partyName: "",
-        cardName: "",
-        cardNumber: "",
-        bankName: "",
-        deduction: "",
-        pos: "",
-        remarks: "",
-        limitUsed: false,
-        additionalInfo: "",
-        createdat: "",
-        updatedat: "",
-      });
+    if (row) { setFormData(row); setIsEditing(true); }
+    else {
+      setFormData({ date: "", partyName: "", cardName: "", cardNumber: "", bankName: "", deduction: "", pos: "", remarks: "", limitUsed: false, additionalInfo: "" });
       setIsEditing(false);
     }
     setOpen(true);
   };
 
-  const handleClose = () => setOpen(false);
+  const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
-  const handleChange = (e) =>
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-
-  // SAVE card
+  /* createdat / updatedat are server-managed, so they are not sent. */
   const handleSave = async () => {
+    setSaving(true); setError("");
     try {
-      const now = new Date().toISOString();
-
-      const payload = {
-        date: formData.date,
-        partyName: formData.partyName,
-        cardName: formData.cardName,
-        cardNumber: formData.cardNumber,
-        deduction: Number(formData.deduction) || 0,
-        pos: formData.pos,
-        remarks: formData.remarks,
-        limitUsed: formData.limitUsed,
-        // metadata: formData.metadata, // OR formData.metadata
-        bankName: formData.bankName,
-        additionalInfo: formData.additionalInfo,
-        createdat: now,
-        updatedat: now
-      };
-
-      await AdminService.saveCard(payload);
-      fetchData();
-      handleClose();
-    } catch (err) {
-      console.error(err);
-      alert("Failed to save record.");
-    }
+      await AdminService.saveCard(formData);
+      setOpen(false);
+      await fetchData();
+    } catch (e) {
+      setError(e?.message || "Could not create the swipe entry.");
+    } finally { setSaving(false); }
   };
-
 
   const handleUpdate = async () => {
+    setSaving(true); setError("");
     try {
-      const now = new Date().toISOString();
-
-      const { id, ...rest } = formData;
-
-      const payload = {
-        ...rest,
-        updatedat: now,
-        id
-      };
-
-      await AdminService.updateCard(id, payload);
-
-      fetchData();
-      handleClose();
-    } catch (err) {
-      console.error(err);
-      alert("Failed to update record.");
-    }
+      await AdminService.updateCard(formData.id, formData);
+      setOpen(false);
+      await fetchData();
+    } catch (e) {
+      setError(e?.message || "Could not update the swipe entry.");
+    } finally { setSaving(false); }
   };
 
-
-
-  // DELETE user
   const handleDelete = async (id) => {
-    if (!window.confirm("Delete this record?")) return;
+    if (!window.confirm("Are you sure you want to delete this swipe transaction record?")) return;
+    setError("");
     try {
       await AdminService.deleteCard(id);
-      setRows((prev) => prev.filter((r) => r.id !== id));
-    } catch (err) {
-      console.error(err);
-      alert("Failed to delete record.");
+      setRows((p) => p.filter((r) => r.id !== id));
+    } catch (e) {
+      setError(e?.message || "Could not delete the swipe entry.");
     }
   };
 
-  const formatDate = (value) => {
-    if (!value) return "";
-    const d = new Date(value);
-    return d.toLocaleString("en-IN", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+  const formatDate = (v) => {
+    if (!v) return "—";
+    return new Date(v).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
   };
 
-  const formatForInput = (value) => {
-    if (!value) return "";
-    const d = new Date(value);
+  const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    const hour = String(d.getHours()).padStart(2, "0");
-    const min = String(d.getMinutes()).padStart(2, "0");
+  const filteredRows = useMemo(() =>
+    rows.filter((r) => {
+      const matchesSearch =
+        (r.partyName || "").toLowerCase().includes(search.toLowerCase()) ||
+        (r.cardNumber || "").toString().includes(search) ||
+        (r.bankName || "").toLowerCase().includes(search.toLowerCase());
 
-    return `${year}-${month}-${day}T${hour}:${min}`;
-  };
+      const matchesFilter =
+        filterStatus === "all" ? true :
+        filterStatus === "used" ? Boolean(r.limitUsed) :
+        filterStatus === "pending" ? !r.limitUsed : true;
 
+      return matchesSearch && matchesFilter;
+    }), [rows, search, filterStatus]);
 
-  // SEARCH
-  const filteredRows = rows.filter(
-    (r) =>
-      r.partyName?.toLowerCase().includes(search.toLowerCase()) ||
-      r.cardNumber?.toString().includes(search)
-  );
-
-  // EXPORT
+  /* Export / Import */
   const handleExport = () => {
     const sheet = XLSX.utils.json_to_sheet(filteredRows);
-    const book = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(book, sheet, "Transactions");
-
-    const excel = XLSX.write(book, { bookType: "xlsx", type: "array" });
-    saveAs(new Blob([excel]), "transactions.xlsx");
+    const book  = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(book, sheet, "CardSwipes");
+    saveAs(new Blob([XLSX.write(book, { bookType: "xlsx", type: "array" })]), "card_swipes.xlsx");
   };
-  const handleImport = async (event) => {
-    const file = event.target.files[0];
+
+  const handleImport = async (e) => {
+    const file = e.target.files[0];
     if (!file) return;
-  
     const reader = new FileReader();
-  
-    reader.onload = async (e) => {
-      const data = new Uint8Array(e.target.result);
-      const workbook = XLSX.read(data, { type: "array" });
-  
-      const sheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[sheetName];
-  
-      const importedData = XLSX.utils.sheet_to_json(worksheet);
-  
-      const now = new Date().toISOString();
-  
-      const validRows = importedData.filter(
-        (row) => row.partyName && row.cardNumber
-      );
-  
-      const payloads = validRows.map((row) => ({
-        date: row.date ? new Date(row.date).toISOString() : null,
-        partyName: row.partyName,
-        cardName: row.cardName || "",
-        cardNumber: row.cardNumber,
-        bankName: row.bankName || "",
-        deduction: Number(row.deduction) || 0,
-        pos: row.pos || "",
-        remarks: row.remarks || "",
-        limitUsed: row.limitUsed || false,
-        additionalInfo: row.additionalInfo || "",
-        createdat: now,
-        updatedat: now,
-      }));
-  
-      // Append to grid with temporary IDs for display
-      const rowsWithTempId = payloads.map((p, idx) => ({
-        ...p,
-        id: `temp-${Date.now()}-${idx}`,
-      }));
-      setRows((prev) => [...prev, ...rowsWithTempId]);
-  
-      // Post to backend
-      await Promise.all(
-        payloads.map((payload) =>
-          AdminService.saveCard(payload).catch((err) =>
-            console.error("Failed row:", payload, err)
-          )
-        )
-      );
-  
-      alert("Import completed!");
+    reader.onload = async (ev) => {
+      const wb = XLSX.read(new Uint8Array(ev.target.result), { type: "array" });
+      const data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+      const valid = data.filter((r) => r.cardName && r.cardNumber);
+
+      let failed = 0;
+      for (const row of valid) {
+        try { await AdminService.saveCard(row); } catch { failed += 1; }
+      }
+      if (failed) setError(`${failed} of ${valid.length} imported rows could not be saved.`);
+      await fetchData();
     };
-  
+    e.target.value = "";   // let the same file be picked again
     reader.readAsArrayBuffer(file);
   };
-  
 
   const columns = [
-    {
-      field: "date",
-      headerName: "Date",
-      flex: 1,
-      valueFormatter: (params) => formatDate(params),
-    },
-    { field: "partyName", headerName: "Party Name", flex: 1 },
-    { field: "cardName", headerName: "Card Name", flex: 1 },
-    { field: "cardNumber", headerName: "Card Number", flex: 1 },
-    { field: "bankName", headerName: "Bank Name", flex: 1 },
-    { field: "deduction", headerName: "Deduction", flex: 1 },
-    { field: "pos", headerName: "POS", flex: 1 },
-    { field: "remarks", headerName: "Remarks", flex: 1 },
-    // { field: "metadata", headerName: "Metadata", flex: 1 },
-    { field: "limitUsed", headerName: "Limit Used", flex: 1 },
-    { field: "additionalInfo", headerName: "Additional Info", flex: 1 },
-
-    // formatted created date
-    {
-      field: "createdat",
-      headerName: "Created At",
-      flex: 1,
-      valueFormatter: (params) => formatDate(params),
-    },
-
-    // formatted updated date
-    {
-      field: "updatedat",
-      headerName: "Updated At",
-      flex: 1,
-      valueFormatter: (params) => formatDate(params),
-    },
-
-    {
-      field: "actions",
-      headerName: "Actions",
-      width: 120,
-      sortable: false,
-      renderCell: (params) => (
-        <>
-          <IconButton color="primary" onClick={() => handleOpen(params.row)}>
-            <Edit />
-          </IconButton>
-          <IconButton color="error" onClick={() => handleDelete(params.row.id)}>
-            <Delete />
-          </IconButton>
-        </>
+    { field: "date", headerName: "Date", width: 120, valueFormatter: (v) => formatDate(v) },
+    { field: "partyName", headerName: "Party Name", flex: 1.2, minWidth: 150,
+      renderCell: (p) => p.value || "—" },
+    { field: "cardName", headerName: "Card Name", flex: 1.1, minWidth: 140,
+      renderCell: (p) => (
+        <Stack justifyContent="center" sx={{ height: "100%" }}>
+          <Typography variant="body2" noWrap>{p.value || "—"}</Typography>
+          {p.row.cardNumber && (
+            <Typography variant="caption" color="text.secondary" noWrap>
+              ···· {String(p.row.cardNumber).slice(-4)}
+            </Typography>
+          )}
+        </Stack>
       ),
     },
+    { field: "bankName", headerName: "Bank", width: 130 },
+    { field: "deduction", headerName: "Amount", width: 130, align: "right", headerAlign: "right",
+      renderCell: (p) => (
+        <Typography variant="body2" className="tabular-nums" sx={{ fontWeight: 600, color: "success.main" }}>
+          {fmt(p.value)}
+        </Typography>
+      ),
+    },
+    { field: "pos", headerName: "POS Outlet", width: 130 },
+    {
+      field: "limitUsed", headerName: "Status", width: 120,
+      renderCell: (p) => (
+        <Chip
+          size="small"
+          variant="outlined"
+          color={p.value ? "success" : "warning"}
+          label={p.value ? "Used" : "Pending"}
+        />
+      ),
+    },
+    ...(canEdit ? [{
+      field: "actions", headerName: "Actions", width: 100, sortable: false, align: "right", headerAlign: "right",
+      renderCell: (p) => (
+        <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+          <Tooltip title="Edit record">
+            <IconButton size="small" onClick={() => handleOpen(p.row)}><Edit fontSize="small" /></IconButton>
+          </Tooltip>
+          <Tooltip title="Delete record">
+            <IconButton size="small" color="error" onClick={() => handleDelete(p.row.id)}><Delete fontSize="small" /></IconButton>
+          </Tooltip>
+        </Stack>
+      ),
+    }] : []),
   ];
 
   return (
-    <Box>
-      <Typography variant="h4" mb={2}>
-        Transactions
-      </Typography>
-      <Box
-        display="flex"
-        alignItems="center"
+    <Box className="page-enter">
+      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
+
+      {/* ── Page Header ─────────────────────────────────────────────── */}
+      <Stack
+        direction={{ xs: "column", sm: "row" }}
         justifyContent="space-between"
-        mb={2}
+        alignItems={{ sm: "center" }}
+        spacing={2}
+        sx={{ mb: 3 }}
       >
-        {/* LEFT SIDE BUTTONS */}
-        <Box display="flex" alignItems="center" gap={2}>
-          <Button variant="contained" onClick={handleExport}>
-            Export to Excel
+        <Box>
+          <Typography variant="h5" gutterBottom>Card Swipes</Typography>
+          <Typography variant="body2" color="text.secondary">
+            Swipe transaction register.
+          </Typography>
+        </Box>
+        {canEdit && (
+          <Button variant="contained" startIcon={<AddIcon />} onClick={() => handleOpen()} sx={{ whiteSpace: "nowrap" }}>
+            Add Swipe Entry
           </Button>
+        )}
+      </Stack>
 
-          <Button
-            variant="contained"
-            onClick={() => fileInputRef.current.click()}
-          >
-            Import to Grid
-          </Button>
-
-          <input
-            type="file"
-            accept=".xlsx, .xls"
-            ref={fileInputRef}
-            style={{ display: "none" }}
-            onChange={handleImport}
+      {/* ── Filters & Data Table ────────────────────────────────────── */}
+      <Paper variant="outlined" sx={{ overflow: "hidden" }}>
+        <Stack
+          direction={{ xs: "column", md: "row" }}
+          spacing={2}
+          alignItems={{ md: "center" }}
+          sx={{ p: 2 }}
+        >
+          <TextField
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search party, card or bank"
+            sx={{ minWidth: { sm: 260 }, flexGrow: 1 }}
+            InputProps={{
+              startAdornment: (
+                <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>
+              ),
+              endAdornment: search ? (
+                <InputAdornment position="end">
+                  <IconButton size="small" onClick={() => setSearch("")}>
+                    <ClearIcon fontSize="small" />
+                  </IconButton>
+                </InputAdornment>
+              ) : null,
+            }}
           />
 
+          <TextField
+            select
+            label="Status"
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+            sx={{ minWidth: 180 }}
+          >
+            {STATUS_FILTERS.map((f) => (
+              <MenuItem key={f.id} value={f.id}>{f.label}</MenuItem>
+            ))}
+          </TextField>
 
-        </Box>
+          <Box sx={{ flexGrow: 1 }} />
 
-        {/* RIGHT SIDE BUTTON */}
-        <Button
-          variant="contained"
-          onClick={() => handleOpen()}
-          sx={{ whiteSpace: "nowrap" }}
-        >
-          Add New Card
-        </Button>
-      </Box>
+          <Stack direction="row" spacing={1}>
+            <Button variant="outlined" startIcon={<DownloadIcon />} onClick={handleExport}>
+              Export
+            </Button>
+            {canEdit && (
+              <Button variant="outlined" startIcon={<UploadIcon />} onClick={() => fileInputRef.current?.click()}>
+                Import
+              </Button>
+            )}
+            <input type="file" accept=".xlsx,.xls" ref={fileInputRef} style={{ display: "none" }} onChange={handleImport} />
+          </Stack>
+        </Stack>
 
+        <Divider />
 
-
-      <TextField
-        fullWidth
-        placeholder="Search by party name or card number..."
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        sx={{ mb: 2 }} // margin-bottom: 16px
-      />
-
-
-
-      {loading ? (
-        <Box height={300} display="flex" justifyContent="center" alignItems="center">
-          <CircularProgress />
-        </Box>
-      ) : (
-        <DataGrid
-          rows={filteredRows}
-          columns={columns}
-          pageSize={10}
-          autoHeight
-          disableRowSelectionOnClick
-        />
-      )}
-
-      {/* --- Modal --- */}
-      <Dialog open={open} onClose={handleClose} fullScreen={fullScreen} maxWidth="sm" fullWidth>
-        <DialogTitle>{isEditing ? "Edit Transaction" : "Add Transaction"}</DialogTitle>
-
-        <DialogContent dividers>
-          <Box display="flex" flexDirection="column" gap={2}>
-            <TextField label="Date" name="date" type="datetime-local" value={formatForInput(formData.date) || ""} onChange={handleChange} fullWidth InputLabelProps={{ shrink: true }} />
-            <TextField label="Party Name" name="partyName" value={formData.partyName || ""} onChange={handleChange} fullWidth />
-            <TextField label="Card Name" name="cardName" value={formData.cardName || ""} onChange={handleChange} fullWidth />
-            <TextField label="Card Number" name="cardNumber" value={formData.cardNumber || ""} onChange={handleChange} fullWidth />
-            <TextField label="Bank Name" name="bankName" value={formData.bankName || ""} onChange={handleChange} fullWidth />
-            <TextField label="Deduction" name="deduction" value={formData.deduction || ""} onChange={handleChange} fullWidth />
-            <TextField label="POS" name="pos" value={formData.pos || ""} onChange={handleChange} fullWidth />
-            <TextField label="Remarks" name="remarks" value={formData.remarks || ""} onChange={handleChange} fullWidth />
-            {/* <TextField label="Metadata" name="metadata" value={formData.metadata || ""} onChange={handleChange} fullWidth /> */}
-            <Box display="flex" alignItems="center">
-              <Checkbox
-                checked={formData.limitUsed || false}
-                onChange={(e) =>
-                  setFormData({ ...formData, limitUsed: e.target.checked })
-                }
-              />
-              <Typography>Limit Used</Typography>
-            </Box>
-
-            <TextField label="Additional Info" name="additionalInfo" value={formData.additionalInfo || ""} onChange={handleChange} fullWidth />
+        {loading ? (
+          <Box sx={{ py: 10, display: "grid", placeItems: "center" }}>
+            <CircularProgress />
           </Box>
+        ) : (
+          <Box sx={{ height: 580 }}>
+            <DataGrid
+              rows={filteredRows}
+              columns={columns}
+              disableRowSelectionOnClick
+              initialState={{ pagination: { paginationModel: { pageSize: 25 } } }}
+              pageSizeOptions={[10, 25, 50, 100]}
+              localeText={{ noRowsLabel: "No card swipes match your filters." }}
+              rowHeight={56}
+            />
+          </Box>
+        )}
+      </Paper>
+
+      {/* ── Add / Edit Dialog ───────────────────────────────────────── */}
+      <Dialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth fullScreen={isMobile}>
+        <DialogTitle>{isEditing ? "Edit Card Swipe Entry" : "New Card Swipe Entry"}</DialogTitle>
+        <Divider />
+        <DialogContent>
+          <Grid container spacing={2} sx={{ mt: 0 }}>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <TextField label="Transaction Date" name="date" type="datetime-local" fullWidth
+                value={formData.date ? new Date(formData.date).toISOString().slice(0, 16) : ""}
+                onChange={handleChange} InputLabelProps={{ shrink: true }} />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <TextField label="Party Name" name="partyName" fullWidth
+                value={formData.partyName || ""} onChange={handleChange} />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <TextField label="Card Name" name="cardName" required fullWidth placeholder="e.g. HDFC Regalia"
+                value={formData.cardName || ""} onChange={handleChange} />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <TextField label="Card Number" name="cardNumber" required fullWidth
+                value={formData.cardNumber || ""} onChange={handleChange} />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <TextField label="Bank Name" name="bankName" fullWidth placeholder="e.g. ICICI Bank"
+                value={formData.bankName || ""} onChange={handleChange} />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <TextField label="Amount (₹)" name="deduction" type="number" fullWidth
+                value={formData.deduction || ""} onChange={handleChange} />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <TextField label="POS / Outlet" name="pos" fullWidth
+                value={formData.pos || ""} onChange={handleChange} />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <TextField label="Additional Info" name="additionalInfo" fullWidth
+                value={formData.additionalInfo || ""} onChange={handleChange} />
+            </Grid>
+            <Grid size={12}>
+              <TextField label="Remarks" name="remarks" fullWidth multiline minRows={2}
+                value={formData.remarks || ""} onChange={handleChange} />
+            </Grid>
+            <Grid size={12}>
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={Boolean(formData.limitUsed)}
+                    onChange={(e) => setFormData({ ...formData, limitUsed: e.target.checked })}
+                  />
+                }
+                label="Limit used / settled"
+              />
+            </Grid>
+          </Grid>
         </DialogContent>
-
-        <DialogActions>
-          <Button onClick={handleClose}>Cancel</Button>
-          {isEditing ? (
-            <Button variant="contained" onClick={handleUpdate}>Update</Button>
-          ) : (
-            <Button variant="contained" onClick={handleSave}>Add</Button>
-          )}
-
-
+        <Divider />
+        <DialogActions sx={{ px: 3, py: 2 }}>
+          <Button onClick={() => setOpen(false)}>Cancel</Button>
+          <Button
+            variant="contained"
+            disabled={saving || !formData.cardName || !formData.cardNumber}
+            onClick={isEditing ? handleUpdate : handleSave}
+          >
+            {saving ? "Saving…" : isEditing ? "Save Changes" : "Create Swipe"}
+          </Button>
         </DialogActions>
       </Dialog>
     </Box>

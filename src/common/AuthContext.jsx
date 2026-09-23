@@ -1,49 +1,75 @@
-import React, { createContext, useState, useContext, useEffect } from "react";
+import React, { createContext, useState, useContext, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
+import AuthService from "../services/AuthService";
+import { setAuthFailureHandler } from "../services/apiClient";
+import { getUser, hasSession, clearSession } from "../services/tokenStore";
 
 const AuthContext = createContext();
 
 export const AuthProvider = ({ children }) => {
+  const [user, setUser] = useState(null);
   const [userRole, setUserRole] = useState(null);
-  const [loading, setLoading] = useState(true); // 👈 new
+  const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
-  // ✅ Load saved role once on app start
+  /* Restore the session on boot. The stored access token may already be
+     expired — the first protected call will refresh it, or drop us here via
+     the auth-failure handler below. */
   useEffect(() => {
-    const savedRole = localStorage.getItem("userRole");
-    if (savedRole) setUserRole(savedRole);
-    setLoading(false); // ✅ finish loading
+    const stored = getUser();
+    if (hasSession() && stored?.role) {
+      setUser(stored);
+      setUserRole(stored.role);
+    }
+    setLoading(false);
   }, []);
 
+  /* The API client calls this when a refresh fails and the session is gone. */
   useEffect(() => {
-    if (userRole) localStorage.setItem("userRole", userRole);
-    else localStorage.removeItem("userRole");
-  }, [userRole]);
+    setAuthFailureHandler(() => {
+      setUser(null);
+      setUserRole(null);
+      navigate("/login", { replace: true });
+    });
+    return () => setAuthFailureHandler(null);
+  }, [navigate]);
 
-  const handleLogin = (email, password) => {
-    if(email=== "master" && password ==="master123"){
-      setUserRole("master");
-      navigate("/dashboard");
-    }
-    else if (email === "admin@example.com" && password === "Admin123") {
-      setUserRole("admin");
-      navigate("/dashboard");
-    } else if (email === "employee@example.com" && password === "Emp123") {
-      setUserRole("employee");
-      navigate("/dashboard");
-    } else {
-      setUserRole("unauthorized");
-      navigate("/access-denied");
-    }
-  };
+  /**
+   * Returns { ok } or { ok: false, message } so the login form can show the
+   * server's own wording rather than guessing.
+   */
+  const handleLogin = useCallback(async (username, password) => {
+    try {
+      const signedIn = await AuthService.login(username, password);
 
-  const handleLogout = () => {
+      if (!signedIn.role) {
+        // Authenticated, but the role is not one this app understands.
+        clearSession();
+        return { ok: false, message: `Unsupported account role: ${signedIn.apiRole ?? "unknown"}.` };
+      }
+
+      setUser(signedIn);
+      setUserRole(signedIn.role);
+      navigate(signedIn.role === "master" ? "/dashboard" : "/transactions", { replace: true });
+      return { ok: true };
+    } catch (error) {
+      const message =
+        error?.status === 401
+          ? "Invalid username or password."
+          : error?.message || "Unable to sign in right now.";
+      return { ok: false, message };
+    }
+  }, [navigate]);
+
+  const handleLogout = useCallback(async () => {
+    await AuthService.logout();
+    setUser(null);
     setUserRole(null);
-    navigate("/login");
-  };
+    navigate("/login", { replace: true });
+  }, [navigate]);
 
   return (
-    <AuthContext.Provider value={{ userRole, handleLogin, handleLogout, loading }}>
+    <AuthContext.Provider value={{ user, userRole, handleLogin, handleLogout, loading }}>
       {children}
     </AuthContext.Provider>
   );

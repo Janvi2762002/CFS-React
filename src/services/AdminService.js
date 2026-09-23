@@ -1,160 +1,104 @@
-// src/services/AdminService.ts
-import axios from "axios";
+import apiClient, { unwrap } from "./apiClient";
+import { toApiRole, toAppRole } from "./AuthService";
 
+/**
+ * Users and CardInfo endpoints.
+ *
+ * Every method returns the business data straight out of `resultObject` and
+ * throws an ApiError on failure — there is deliberately no local fallback,
+ * so an expired session or a server fault surfaces instead of being masked
+ * by stale data.
+ */
+
+/** Strip `password` — the API still returns it and it must never be shown. */
+function toAppUser(user) {
+  if (!user) return user;
+  const { password, role, ...rest } = user;
+  return { ...rest, role: toAppRole(role), apiRole: role };
+}
+
+/** Only send a password when one was actually entered. */
+function toApiUser(user) {
+  const payload = {
+    username: user.username?.trim() ?? "",
+    phoneNumber: user.phoneNumber ?? "",
+    fullName: user.fullName?.trim() ?? "",
+    nickName: user.nickName ?? "",
+    additionalInfo: user.additionalInfo ?? "",
+    role: toApiRole(user.role),
+  };
+  if (user.password) payload.password = user.password;
+  if (user.id != null) payload.id = user.id;
+  return payload;
+}
+
+/** Shape a card to the documented CardInfo contract. */
+function toApiCard(card) {
+  return {
+    ...(card.id != null ? { id: card.id } : {}),
+    cardName: card.cardName?.trim() ?? "",
+    cardNumber: card.cardNumber != null ? String(card.cardNumber).trim() : "",
+    partyName: card.partyName?.trim() || null,
+    deduction: card.deduction === "" || card.deduction == null ? null : Number(card.deduction),
+    date: card.date ? new Date(card.date).toISOString() : null,
+    pos: card.pos || null,
+    remarks: card.remarks || null,
+    limitUsed: Boolean(card.limitUsed),
+    additionalInfo: card.additionalInfo || null,
+    bankName: card.bankName || null,
+  };
+}
 
 class AdminService {
-  // Note: Use relative URLs for proxy
-  // API_BASE_URL = process.env.REACT_APP_API_BASE_URL || "";
-  API_BASE_URL = process.env.REACT_APP_API_BASE_URL || "";
+  /* ── Users (Master / Admin only) ───────────────────────────────────── */
 
-
-  // Fetch all users
   async getUsers() {
-    try {
-      const response = await axios.get(`${this.API_BASE_URL}/Users`, {
-        headers: {
-          "Content-Type": "application/json",
-          // Add Authorization if needed:
-          // "Authorization": `Bearer ${yourToken}`
-        },
-      });
-      return response.data;
-    } catch (error) {
-      console.error("Error fetching users:", error);
-      throw error;
-    }
+    const data = unwrap(await apiClient.get("/Users"));
+    return (Array.isArray(data) ? data : []).map(toAppUser);
   }
 
-  // Fetch single user by ID
   async getUserById(userId) {
-    try {
-      const response = await axios.get(`${this.API_BASE_URL}/Users/${userId}`, {
-        headers: {
-          "Content-Type": "application/json",
-        },
-      });
-      return response.data;
-    } catch (error) {
-      console.error("Error fetching user:", error);
-      throw error;
-    }
+    return toAppUser(unwrap(await apiClient.get(`/Users/${userId}`)));
   }
 
-// update a user
   async saveUser(user) {
-    try {
-      if (user.id) {
-        // Update existing user
-        const response = await axios.put(
-          `${this.API_BASE_URL}/Users/${user.id}`,
-          user,
-          { headers: { "Content-Type": "application/json" } }
-        );
-        return response.data;
-    } 
-  }
-  catch (error) {
-      console.error("Error saving user:", error);
-      throw error;
-    }
+    return toAppUser(unwrap(await apiClient.post("/Users", toApiUser(user))));
   }
 
-  async updateUser(userId,user) {
-    try {
-      if (userId) {
-        // Update existing user
-        const response = await axios.put(
-          `${this.API_BASE_URL}/Users/${userId}`,
-          user,
-          { headers: { "Content-Type": "application/json" } }
-        );
-        return response.data;
-    } 
+  async updateUser(userId, user) {
+    // The route id and the body id must agree.
+    const payload = { ...toApiUser(user), id: Number(userId) };
+    return toAppUser(unwrap(await apiClient.put(`/Users/${userId}`, payload)));
   }
-  catch (error) {
-      console.error("Error saving user:", error);
-      throw error;
-    }
-  }
-  // Delete a user
+
   async deleteUser(userId) {
-    try {
-      const response = await axios.delete(`${this.API_BASE_URL}/Users/${userId}`, {
-        headers: { "Content-Type": "application/json" },
-      });
-      return response.data;
-    } catch (error) {
-      console.error("Error deleting user:", error);
-      throw error;
-    }
+    return unwrap(await apiClient.delete(`/Users/${userId}`)) === true;
   }
+
+  /* ── CardInfo (any authenticated user) ─────────────────────────────── */
 
   async getCardInfo() {
-    try {
-      const response = await axios.get(`${this.API_BASE_URL}/CardInfo`, {
-        headers: {
-          "Content-Type": "application/json",
-          // Add Authorization if needed:
-          // "Authorization": `Bearer ${yourToken}`
-        },
-      });
-      return response.data;
-    } catch (error) {
-      console.error("Error fetching users:", error);
-      throw error;
-    }
+    const data = unwrap(await apiClient.get("/CardInfo"));
+    return Array.isArray(data) ? data : [];
+  }
+
+  async getCardById(cardId) {
+    return unwrap(await apiClient.get(`/CardInfo/${cardId}`));
   }
 
   async saveCard(card) {
-    try {
-        // Update existing user
-        const response = await axios.post(
-          `${this.API_BASE_URL}/CardInfo`,
-          card,
-          { headers: { "Content-Type": "application/json" } }
-        );
-        return response.data;
-    } 
-  
-  catch (error) {
-      console.error("Error saving card:", error);
-      throw error;
-    }
+    return unwrap(await apiClient.post("/CardInfo", toApiCard(card)));
   }
 
-  // update card
-  async updateCard(cardId , card) {
-    try {
-      if (cardId) {
-        // Update existing user
-        const response = await axios.put(
-          `${this.API_BASE_URL}/CardInfo/${cardId}`,
-          card,
-          { headers: { "Content-Type": "application/json" } }
-        );
-        return response.data;
-    } 
+  async updateCard(cardId, card) {
+    const payload = { ...toApiCard(card), id: Number(cardId) };
+    return unwrap(await apiClient.put(`/CardInfo/${cardId}`, payload));
   }
-  catch (error) {
-      console.error("Error saving user:", error);
-      throw error;
-    }
-  }
+
   async deleteCard(cardId) {
-    try {
-      const response = await axios.delete(`${this.API_BASE_URL}/CardInfo/${cardId}`, {
-        headers: { "Content-Type": "application/json" },
-      });
-      return response.data;
-    } catch (error) {
-      console.error("Error deleting user:", error);
-      throw error;
-    }
+    return unwrap(await apiClient.delete(`/CardInfo/${cardId}`)) === true;
   }
 }
 
-// Export single instance
 const adminService = new AdminService();
 export default adminService;
-
-
