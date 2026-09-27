@@ -11,9 +11,6 @@ import Payments from "./pages/Payments";
 import Parties from "./pages/Parties";
 import AccessDenied from "./pages/AccessDenied";
 import Restricted from "./pages/Restricted";
-import StockItems from "./pages/StockItems";
-import StockPayments from "./pages/StockPayments";
-import CashLedger from "./pages/CashLedger";
 
 function AppRoutes() {
   const { userRole, handleLogin, handleLogout, loading } = useAuth();
@@ -55,14 +52,9 @@ function AppRoutes() {
 
           <Route path="/transactions" element={<Transactions />} />
 
-          {/* Admin + Master: Cash & Stock Management */}
+          {/* Admin + Master: Cash Management */}
           {(userRole === "master" || userRole === "admin") && (
-            <>
-              <Route path="/payments" element={<Payments />} />
-              <Route path="/stock-items" element={<StockItems />} />
-              <Route path="/stock-payments" element={<StockPayments />} />
-              <Route path="/cash-ledger" element={<CashLedger />} />
-            </>
+            <Route path="/payments" element={<Payments />} />
           )}
 
           {/* Master only: User Management */}

@@ -11,7 +11,6 @@ import Inventory2Icon from "@mui/icons-material/Inventory2Outlined";
 import GroupsIcon from "@mui/icons-material/GroupsOutlined";
 import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import LogoutIcon from "@mui/icons-material/LogoutOutlined";
-import ReceiptIcon from "@mui/icons-material/ReceiptOutlined";
 import { SIDEBAR_WIDTH, SIDEBAR_WIDTH_COLLAPSED } from "../../theme/theme";
 import { useAuth } from "../../common/AuthContext";
 
@@ -37,15 +36,6 @@ const CASH = {
   tabId: "cash", label: "Cash Management",
   items: [
     { label: "Payments", path: "/payments", icon: AccountBalanceWalletIcon },
-    { label: "Cash Ledger", path: "/cash-ledger", icon: AccountBalanceWalletIcon },
-  ],
-};
-
-const STOCK = {
-  tabId: "stock", label: "Stock Management",
-  items: [
-    { label: "Stock Items", path: "/stock-items", icon: Inventory2Icon },
-    { label: "Stock Payments", path: "/stock-payments", icon: ReceiptIcon },
   ],
 };
 
@@ -57,8 +47,8 @@ const ADMINISTRATION = {
 };
 
 const NAV = {
-  master:   [OVERVIEW, CARDS, STOCK, CASH, ADMINISTRATION],
-  admin:    [OVERVIEW, CARDS, STOCK, CASH],
+  master:   [OVERVIEW, CARDS, CASH, ADMINISTRATION],
+  admin:    [OVERVIEW, CARDS, CASH],
   employee: [OVERVIEW, CARDS],
 };
 
@@ -177,6 +167,38 @@ export default function Sidebar({ collapsed = false, onNavigate }) {
             })}
           </List>
         ))}
+
+        {/* Stock Management — not built yet */}
+        {(userRole === "master" || userRole === "admin") && (
+          <List
+            dense
+            disablePadding
+            sx={{ px: 1 }}
+            subheader={collapsed ? null : <ListSubheader disableSticky sx={subheaderSx}>Stock Management</ListSubheader>}
+          >
+            <Tooltip title={collapsed ? "Stock — coming soon" : ""} placement="right">
+              <ListItemButton
+                disabled
+                sx={{
+                  borderRadius: 1,
+                  minHeight: 40,
+                  px: collapsed ? 1 : 2,
+                  justifyContent: collapsed ? "center" : "flex-start",
+                }}
+              >
+                <ListItemIcon sx={{ minWidth: collapsed ? 0 : 36, justifyContent: "center" }}>
+                  <Inventory2Icon fontSize="small" />
+                </ListItemIcon>
+                {!collapsed && (
+                  <>
+                    <ListItemText primary="Stock Items" />
+                    <Chip label="Soon" size="small" />
+                  </>
+                )}
+              </ListItemButton>
+            </Tooltip>
+          </List>
+        )}
       </Box>
 
       {/* ── Profile footer, with sign out ─────────────────────────────── */}
