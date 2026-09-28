@@ -2,13 +2,14 @@ import React from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
 import { Box, CircularProgress } from "@mui/material";
 import ThemeModeProvider from "./theme/ThemeModeProvider";
+import BackdropBlur from "./theme/BackdropBlur";
 import { AuthProvider, useAuth } from "./common/AuthContext";
 import LoginPage from "./pages/LoginPage";
 import MainLayout from "./layouts/MainLayout";
 import Dashboard from "./pages/Dashboard";
-import Transactions from "./pages/Transactions";
-import Payments from "./pages/Payments";
-import Parties from "./pages/Parties";
+import CardSwipes from "./pages/CardSwipes";
+import CardPayments from "./pages/CardPayments";
+import Users from "./pages/Users";
 import AccessDenied from "./pages/AccessDenied";
 import Restricted from "./pages/Restricted";
 import StockItems from "./pages/StockItems";
@@ -53,21 +54,26 @@ function AppRoutes() {
             element={isMaster ? <Dashboard /> : <Restricted page="The analytics dashboard" />}
           />
 
-          <Route path="/transactions" element={<Transactions />} />
+          {/* Card Management pages */}
+          <Route path="/transactions" element={<CardSwipes />} />
+          <Route path="/payments"     element={<CardPayments />} />
 
           {/* Admin + Master: Cash & Stock Management */}
           {(userRole === "master" || userRole === "admin") && (
             <>
-              <Route path="/payments" element={<Payments />} />
-              <Route path="/stock-items" element={<StockItems />} />
+              <Route path="/stock-items"   element={<StockItems />} />
               <Route path="/stock-payments" element={<StockPayments />} />
-              <Route path="/cash-ledger" element={<CashLedger />} />
+              <Route path="/cash-ledger"   element={<CashLedger />} />
             </>
           )}
 
-          {/* Master only: User Management */}
+          {/* Master only: User Management (previously /parties) */}
           {userRole === "master" && (
-            <Route path="/parties" element={<Parties />} />
+            <>
+              <Route path="/users"   element={<Users />} />
+              {/* Keep /parties alive to avoid hard 404s from old bookmarks */}
+              <Route path="/parties" element={<Navigate to="/users" replace />} />
+            </>
           )}
 
           {/* Catch-all → role's landing page */}
@@ -84,11 +90,15 @@ function AppRoutes() {
 export default function App() {
   return (
     <ThemeModeProvider>
-      <Router>
-        <AuthProvider>
-          <AppRoutes />
-        </AuthProvider>
-      </Router>
+      {/* Blurs the page behind dialogs, confirm prompts and the mobile
+          drawer. Belongs in theme.js — see the note in BackdropBlur.jsx. */}
+      <BackdropBlur>
+        <Router>
+          <AuthProvider>
+            <AppRoutes />
+          </AuthProvider>
+        </Router>
+      </BackdropBlur>
     </ThemeModeProvider>
   );
 }

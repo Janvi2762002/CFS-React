@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Box, Button, Dialog, DialogActions, DialogContent, DialogTitle,
   TextField, Typography, IconButton, useMediaQuery,
-  CircularProgress, Stack, Paper, Divider, Grid, Alert, InputAdornment, Tooltip, MenuItem
+  Stack, Paper, Divider, Grid, Alert, InputAdornment, Tooltip, MenuItem
 } from "@mui/material";
 import { DataGrid } from "@mui/x-data-grid";
 import EditIcon from "@mui/icons-material/EditOutlined";
@@ -12,38 +12,50 @@ import AddIcon from "@mui/icons-material/Add";
 import ClearIcon from "@mui/icons-material/Clear";
 import ReceiptIcon from "@mui/icons-material/ReceiptOutlined";
 import StatTile from "../components/StatTile";
+import ConfirmDialog from "../components/ConfirmDialog";
 import StockPaymentInfoService from "../services/StockPaymentInfoService";
 import StockItemService from "../services/StockItemService";
+import { paginationDisplayedRows } from "../components/gridPagination";
 
 export default function StockPayments() {
-  const [payments, setPayments] = useState([]);
-  const [stockItems, setStockItems] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [open, setOpen] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
-  const [search, setSearch] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const [formData, setFormData] = useState({});
+  const [payments,        setPayments]        = useState([]);
+  const [rowCount,        setRowCount]        = useState(0);
+  const [paginationModel, setPaginationModel] = useState({ page: 0, pageSize: 25 });
+  const [stockItems,      setStockItems]      = useState([]);
+  const [loading,         setLoading]         = useState(true);
+  const [open,            setOpen]            = useState(false);
+  const [isEditing,       setIsEditing]       = useState(false);
+  const [search,          setSearch]          = useState("");
+  const [saving,          setSaving]          = useState(false);
+  const [error,           setError]           = useState("");
+  const [formData,        setFormData]        = useState({});
+  const [confirm,         setConfirm]         = useState({ open: false, id: null });
   const isMobile = useMediaQuery("(max-width:768px)");
 
-  useEffect(() => { loadData(); }, []);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const [pmts, items] = await Promise.all([
-        StockPaymentInfoService.getPayments(),
-        StockItemService.getItems()
+      const [{ data, total }, rawItems] = await Promise.all([
+        StockPaymentInfoService.getPaymentsPaginated({
+          page: paginationModel.page + 1,
+          pageSize: paginationModel.pageSize,
+        }),
+        StockItemService.getItems(),
       ]);
-      setPayments(pmts || []);
-      setStockItems(items || []);
+      setPayments(Array.isArray(data) ? data : []);
+      setRowCount(total || 0);
+      const itemsList = Array.isArray(rawItems) ? rawItems : rawItems?.items || rawItems?.data || [];
+      setStockItems(itemsList);
     } catch (e) {
       setPayments([]);
+      setRowCount(0);
+      setStockItems([]);
       setError(e?.message || "Could not load data.");
     } finally { setLoading(false); }
-  };
+  }, [paginationModel]);
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   const handleOpen = (item = null) => {
     if (item) {
@@ -98,16 +110,21 @@ export default function StockPayments() {
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm("Are you sure you want to delete this payment?")) return;
+    setConfirm({ open: true, id });
+  };
+
+  const handleDeleteConfirmed = async () => {
+    const { id } = confirm;
     setError("");
     try {
       await StockPaymentInfoService.deletePayment(id);
-      setPayments((prev) => prev.filter((x) => x.id !== id));
+      await loadData();
     } catch (e) {
       setError(e?.message || "Could not delete payment.");
     }
   };
 
+  /* Client-side search on the current page */
   const filtered = useMemo(() => {
     return payments.filter((i) => {
       const q = search.toLowerCase();
@@ -118,12 +135,12 @@ export default function StockPayments() {
   }, [payments, search]);
 
   const columns = [
-    { field: "no", headerName: "No.", width: 100 },
-    { field: "partyName", headerName: "Party Name", flex: 1, minWidth: 150 },
+    { field: "no",          headerName: "No.",          width: 100 },
+    { field: "partyName",   headerName: "Party Name",   flex: 1, minWidth: 150 },
     { field: "accountName", headerName: "Account Name", flex: 1, minWidth: 150 },
-    { field: "bank", headerName: "Bank", width: 120 },
-    { field: "amount", headerName: "Amount", width: 120, type: "number" },
-    { field: "date", headerName: "Date", width: 120, valueGetter: (p) => p.split("T")[0] },
+    { field: "bank",        headerName: "Bank",         width: 120 },
+    { field: "amount",      headerName: "Amount",       width: 120, type: "number" },
+    { field: "date",        headerName: "Date",         width: 120, valueGetter: (p) => p ? p.split("T")[0] : "" },
     {
       field: "actions", headerName: "Actions", width: 100, sortable: false, align: "right", headerAlign: "right",
       renderCell: (p) => (
@@ -140,6 +157,7 @@ export default function StockPayments() {
   ];
 
   const totalAmount = filtered.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+  const safeStockItems = Array.isArray(stockItems) ? stockItems : [];
 
   return (
     <Box className="page-enter">
@@ -156,8 +174,8 @@ export default function StockPayments() {
       </Stack>
 
       <Grid container spacing={2} className="stagger" sx={{ mb: 3 }}>
-        <Grid size={{ xs: 12, sm: 6 }}><StatTile label="Total Payments" value={filtered.length} icon={ReceiptIcon} color="primary" /></Grid>
-        <Grid size={{ xs: 12, sm: 6 }}><StatTile label="Total Amount" value={`₹${totalAmount.toLocaleString()}`} icon={ReceiptIcon} color="success" /></Grid>
+        <Grid size={{ xs: 12, sm: 6 }}><StatTile label="Payments (page)" value={filtered.length} icon={ReceiptIcon} color="primary" /></Grid>
+        <Grid size={{ xs: 12, sm: 6 }}><StatTile label="Page Total Amount" value={`₹${totalAmount.toLocaleString()}`} icon={ReceiptIcon} color="success" /></Grid>
       </Grid>
 
       <Paper variant="outlined" sx={{ overflow: "hidden" }}>
@@ -178,21 +196,25 @@ export default function StockPayments() {
 
         <Divider />
 
-        {loading ? (
-          <Box sx={{ py: 10, display: "grid", placeItems: "center" }}><CircularProgress /></Box>
-        ) : (
-          <Box sx={{ height: 560 }}>
-            <DataGrid
-              rows={filtered}
-              columns={columns}
-              getRowId={(r) => r.id}
-              disableRowSelectionOnClick
-              initialState={{ pagination: { paginationModel: { pageSize: 25 } } }}
-              pageSizeOptions={[10, 25, 50]}
-              rowHeight={56}
-            />
-          </Box>
-        )}
+        <Box sx={{ height: 560 }}>
+          <DataGrid
+            rows={filtered}
+            columns={columns}
+            rowCount={rowCount}
+            loading={loading}
+            paginationMode="server"
+            paginationModel={paginationModel}
+            onPaginationModelChange={setPaginationModel}
+            pageSizeOptions={[5, 10, 25, 50, 100]}
+            getRowId={(r) => r.id}
+            disableRowSelectionOnClick
+            localeText={{
+              noRowsLabel: "No stock payments found.",
+              paginationDisplayedRows: paginationDisplayedRows(paginationModel),
+            }}
+            rowHeight={56}
+          />
+        </Box>
       </Paper>
 
       <Dialog open={open} onClose={() => setOpen(false)} maxWidth="md" fullWidth fullScreen={isMobile}>
@@ -229,7 +251,7 @@ export default function StockPayments() {
 
             <Grid size={{ xs: 12 }}>
               <TextField select label="Linked Stock Item" name="stockItemId" required fullWidth value={formData.stockItemId} onChange={handleChange}>
-                {stockItems.map(item => (
+                {safeStockItems.map(item => (
                   <MenuItem key={item.id} value={item.id}>{item.no} - {item.model} ({item.imei})</MenuItem>
                 ))}
               </TextField>
@@ -248,6 +270,15 @@ export default function StockPayments() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <ConfirmDialog
+        open={confirm.open}
+        title="Delete payment?"
+        message="This action cannot be undone. Are you sure you want to delete this payment record?"
+        confirmLabel="Delete Payment"
+        onConfirm={handleDeleteConfirmed}
+        onClose={() => setConfirm((s) => ({ ...s, open: false }))}
+      />
     </Box>
   );
 }

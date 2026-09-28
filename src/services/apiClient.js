@@ -4,12 +4,21 @@ import {
 } from "./tokenStore";
 
 /**
- * Base URL must include the `/api` segment, e.g.
- *   REACT_APP_API_BASE_URL=https://example.runasp.net/api
+ * Base URL, read from the environment and including the `/api` segment:
+ *   REACT_APP_API_BASE_URL=https://<host>/api
  * The backend exposes no version prefix, so paths here are `/Auth/login`,
  * `/Users`, `/CardInfo`.
+ *
+ * The fallback only applies when the variable is absent (CRA reads .env at
+ * startup, so the dev server must be restarted after changing it). It points
+ * at the same host as .env rather than at an older deployment, so a missing
+ * variable can never silently swing the app onto a different backend.
  */
-export const API_BASE_URL = (process.env.REACT_APP_API_BASE_URL || "").replace(/\/+$/, "");
+const FALLBACK_BASE_URL = "https://smenterprise101.runasp.net/api";
+
+export const API_BASE_URL = (
+  process.env.REACT_APP_API_BASE_URL || FALLBACK_BASE_URL
+).replace(/\/+$/, "");
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
@@ -58,7 +67,13 @@ function messageFrom(error) {
   const msg = data?.message || data?.statusMessage || data?.title;
   if (msg) return msg;
   if (error.code === "ECONNABORTED") return "The server took too long to respond.";
-  if (!error.response) return "Cannot reach the server. Check your connection.";
+  /* No response object means the browser never got a readable reply: the host
+     is down, the request was blocked, or the reply carried no CORS headers so
+     the browser withheld it. These are indistinguishable from script, hence
+     the deliberately broad wording. */
+  if (!error.response) {
+    return "Cannot reach the API server. It may be stopped, unreachable, or refusing this origin.";
+  }
   return STATUS_FALLBACK[error.response.status] || error.message || "Something went wrong.";
 }
 
@@ -96,19 +111,7 @@ apiClient.interceptors.response.use(
     const original = error.config;
     const status = error.response?.status;
 
-    // --- FALLBACK LOGIC ---
-    // If the server is down (no response), timed out, or returns a 5xx error
-    const isNetworkOrServerError = !error.response || (status >= 500 && status <= 599) || error.code === 'ECONNABORTED';
-    
-    if (isNetworkOrServerError && original && !original._fallbackRetried) {
-      original._fallbackRetried = true; // prevent infinite loops
-      original.baseURL = "https://smenterprise101.runasp.net/api"; // switch to fallback
-      return apiClient(original); // automatically retry the request!
-    }
-    // ----------------------
-
-    // 403 means the role is insufficient — refreshing would not help...
-    // (Keep all the existing code below this)
+    // 403 means the role is insufficient — refreshing would not help.
     const recoverable =
       status === 401 &&
       original &&

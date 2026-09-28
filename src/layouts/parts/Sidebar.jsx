@@ -30,13 +30,13 @@ const CARDS = {
   tabId: "cards", label: "Card Management",
   items: [
     { label: "Card Swipes", path: "/transactions", icon: CreditCardIcon },
+    { label: "Card Payments", path: "/payments", icon: ReceiptIcon },
   ],
 };
 
 const CASH = {
   tabId: "cash", label: "Cash Management",
   items: [
-    { label: "Payments", path: "/payments", icon: AccountBalanceWalletIcon },
     { label: "Cash Ledger", path: "/cash-ledger", icon: AccountBalanceWalletIcon },
   ],
 };
@@ -52,7 +52,7 @@ const STOCK = {
 const ADMINISTRATION = {
   tabId: "users", label: "Administration",
   items: [
-    { label: "User Management", path: "/parties", icon: GroupsIcon },
+    { label: "User Management", path: "/users", icon: GroupsIcon },
   ],
 };
 

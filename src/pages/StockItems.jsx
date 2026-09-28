@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Box, Button, Dialog, DialogActions, DialogContent, DialogTitle,
   TextField, Typography, IconButton, useMediaQuery, MenuItem,
@@ -12,34 +12,44 @@ import AddIcon from "@mui/icons-material/Add";
 import ClearIcon from "@mui/icons-material/Clear";
 import Inventory2Icon from "@mui/icons-material/Inventory2Outlined";
 import StatTile from "../components/StatTile";
+import ConfirmDialog from "../components/ConfirmDialog";
 import StockItemService from "../services/StockItemService";
+import { paginationDisplayedRows } from "../components/gridPagination";
 
 export default function StockItems() {
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [open, setOpen] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [inOutFilter, setInOutFilter] = useState("all");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const [formData, setFormData] = useState({});
+  const [items,           setItems]           = useState([]);
+  const [rowCount,        setRowCount]        = useState(0);
+  const [paginationModel, setPaginationModel] = useState({ page: 0, pageSize: 25 });
+  const [loading,         setLoading]         = useState(true);
+  const [open,            setOpen]            = useState(false);
+  const [isEditing,       setIsEditing]       = useState(false);
+  const [search,          setSearch]          = useState("");
+  const [statusFilter,    setStatusFilter]    = useState("all");
+  const [inOutFilter,     setInOutFilter]     = useState("all");
+  const [saving,          setSaving]          = useState(false);
+  const [error,           setError]           = useState("");
+  const [formData,        setFormData]        = useState({});
+  const [confirm,         setConfirm]         = useState({ open: false, id: null });
   const isMobile = useMediaQuery("(max-width:768px)");
 
-  useEffect(() => { loadItems(); }, []);
-
-  const loadItems = async () => {
+  const loadItems = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const data = await StockItemService.getItems();
+      const { data, total } = await StockItemService.getItemsPaginated({
+        page: paginationModel.page + 1,
+        pageSize: paginationModel.pageSize,
+      });
       setItems(data || []);
+      setRowCount(total);
     } catch (e) {
       setItems([]);
+      setRowCount(0);
       setError(e?.message || "Could not load stock items.");
     } finally { setLoading(false); }
-  };
+  }, [paginationModel]);
+
+  useEffect(() => { loadItems(); }, [loadItems]);
 
   const handleOpen = (item = null) => {
     if (item) {
@@ -99,16 +109,21 @@ export default function StockItems() {
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm("Are you sure you want to delete this item?")) return;
+    setConfirm({ open: true, id });
+  };
+
+  const handleDeleteConfirmed = async () => {
+    const { id } = confirm;
     setError("");
     try {
       await StockItemService.deleteItem(id);
-      setItems((prev) => prev.filter((x) => x.id !== id));
+      await loadItems();
     } catch (e) {
       setError(e?.message || "Could not delete the item.");
     }
   };
 
+  /* Client-side search/filter on the current page results */
   const filtered = useMemo(() => {
     return items.filter((i) => {
       const q = search.toLowerCase();
@@ -124,13 +139,13 @@ export default function StockItems() {
   }, [items, search, statusFilter, inOutFilter]);
 
   const columns = [
-    { field: "no", headerName: "No.", width: 100 },
-    { field: "model", headerName: "Model", flex: 1, minWidth: 150 },
-    { field: "imei", headerName: "IMEI", width: 150 },
+    { field: "no",        headerName: "No.",        width: 100 },
+    { field: "model",     headerName: "Model",      flex: 1, minWidth: 150 },
+    { field: "imei",      headerName: "IMEI",       width: 150 },
     { field: "partyName", headerName: "Party Name", flex: 1, minWidth: 150 },
-    { field: "inOut", headerName: "IN/OUT", width: 100 },
-    { field: "status", headerName: "Status", width: 120 },
-    { field: "amount", headerName: "Amount", width: 120, type: "number" },
+    { field: "inOut",     headerName: "IN/OUT",     width: 100 },
+    { field: "status",    headerName: "Status",     width: 120 },
+    { field: "amount",    headerName: "Amount",     width: 120, type: "number" },
     {
       field: "actions", headerName: "Actions", width: 100, sortable: false, align: "right", headerAlign: "right",
       renderCell: (p) => (
@@ -163,8 +178,8 @@ export default function StockItems() {
       </Stack>
 
       <Grid container spacing={2} className="stagger" sx={{ mb: 3 }}>
-        <Grid size={{ xs: 12, sm: 6 }}><StatTile label="Total Items" value={filtered.length} icon={Inventory2Icon} color="primary" /></Grid>
-        <Grid size={{ xs: 12, sm: 6 }}><StatTile label="Total Amount" value={`₹${totalAmount.toLocaleString()}`} icon={Inventory2Icon} color="success" /></Grid>
+        <Grid size={{ xs: 12, sm: 6 }}><StatTile label="Total Items (page)" value={filtered.length} icon={Inventory2Icon} color="primary" /></Grid>
+        <Grid size={{ xs: 12, sm: 6 }}><StatTile label="Page Total Amount" value={`₹${totalAmount.toLocaleString()}`} icon={Inventory2Icon} color="success" /></Grid>
       </Grid>
 
       <Paper variant="outlined" sx={{ overflow: "hidden" }}>
@@ -196,21 +211,25 @@ export default function StockItems() {
 
         <Divider />
 
-        {loading ? (
-          <Box sx={{ py: 10, display: "grid", placeItems: "center" }}><CircularProgress /></Box>
-        ) : (
-          <Box sx={{ height: 560 }}>
-            <DataGrid
-              rows={filtered}
-              columns={columns}
-              getRowId={(r) => r.id}
-              disableRowSelectionOnClick
-              initialState={{ pagination: { paginationModel: { pageSize: 25 } } }}
-              pageSizeOptions={[10, 25, 50]}
-              rowHeight={56}
-            />
-          </Box>
-        )}
+        <Box sx={{ height: 560 }}>
+          <DataGrid
+            rows={filtered}
+            columns={columns}
+            rowCount={rowCount}
+            loading={loading}
+            paginationMode="server"
+            paginationModel={paginationModel}
+            onPaginationModelChange={setPaginationModel}
+            pageSizeOptions={[5, 10, 25, 50, 100]}
+            getRowId={(r) => r.id}
+            disableRowSelectionOnClick
+            localeText={{
+              noRowsLabel: "No stock items match your filters.",
+              paginationDisplayedRows: paginationDisplayedRows(paginationModel),
+            }}
+            rowHeight={56}
+          />
+        </Box>
       </Paper>
 
       <Dialog open={open} onClose={() => setOpen(false)} maxWidth="md" fullWidth fullScreen={isMobile}>
@@ -227,7 +246,7 @@ export default function StockItems() {
             <Grid size={{ xs: 12, sm: 4 }}>
               <TextField label="IMEI" name="imei" fullWidth value={formData.imei} onChange={handleChange} />
             </Grid>
-            
+
             <Grid size={{ xs: 12, sm: 4 }}>
               <TextField label="IN Date" name="inDate" type="date" fullWidth InputLabelProps={{ shrink: true }} value={formData.inDate} onChange={handleChange} />
             </Grid>
@@ -282,6 +301,15 @@ export default function StockItems() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <ConfirmDialog
+        open={confirm.open}
+        title="Delete item?"
+        message="This action cannot be undone. Are you sure you want to delete this stock item?"
+        confirmLabel="Delete Item"
+        onConfirm={handleDeleteConfirmed}
+        onClose={() => setConfirm((s) => ({ ...s, open: false }))}
+      />
     </Box>
   );
 }

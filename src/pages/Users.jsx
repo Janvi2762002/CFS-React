@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import {
   Box, Button, Dialog, DialogActions, DialogContent, DialogTitle,
   TextField, Typography, IconButton, useMediaQuery, MenuItem,
-  CircularProgress, Stack, Chip, InputAdornment, Tooltip, Paper,
+  Stack, Chip, InputAdornment, Tooltip, Paper,
   Divider, Grid, Alert,
 } from "@mui/material";
 import { DataGrid } from "@mui/x-data-grid";
@@ -15,8 +15,10 @@ import BadgeIcon from "@mui/icons-material/BadgeOutlined";
 import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettingsOutlined";
 import PersonIcon from "@mui/icons-material/PersonOutlined";
 import StatTile from "../components/StatTile";
+import ConfirmDialog from "../components/ConfirmDialog";
 import AdminService from "../services/AdminService";
 import { ROLE_OPTIONS } from "../services/AuthService";
+import { paginationDisplayedRows } from "../components/gridPagination";
 
 const ROLE_COLORS = { master: "primary", admin: "success", employee: "info" };
 const ROLES = ROLE_OPTIONS.map((r) => ({ ...r, color: ROLE_COLORS[r.value] || "default" }));
@@ -33,16 +35,21 @@ function RoleChip({ role }) {
   );
 }
 
-export default function Parties() {
-  const [users,     setUsers]     = useState([]);
-  const [loading,   setLoading]   = useState(true);
-  const [open,      setOpen]      = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
-  const [search,    setSearch]    = useState("");
+export default function Users() {
+  const [users,           setUsers]           = useState([]);
+  const [paginationModel, setPaginationModel] = useState({ page: 0, pageSize: 25 });
+  const [loading,         setLoading]         = useState(true);
+  const [open,       setOpen]       = useState(false);
+  const [isEditing,  setIsEditing]  = useState(false);
+  const [search,     setSearch]     = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
-  const [saving,    setSaving]    = useState(false);
-  const [error,     setError]     = useState("");
-  const [formData,  setFormData]  = useState({ username: "", password: "", phoneNumber: "", fullName: "", nickName: "", additionalInfo: "", role: "" });
+  const [saving,     setSaving]     = useState(false);
+  const [error,      setError]      = useState("");
+  const [formData,   setFormData]   = useState({
+    username: "", password: "", phoneNumber: "", fullName: "",
+    nickName: "", additionalInfo: "", role: "",
+  });
+  const [confirm, setConfirm] = useState({ open: false, id: null });
   const isMobile = useMediaQuery("(max-width:768px)");
 
   useEffect(() => { loadUsers(); }, []);
@@ -95,8 +102,6 @@ export default function Parties() {
     } finally { setSaving(false); }
   };
 
-  /* A blank password field means "leave the existing one alone", so it is
-     dropped from the payload rather than sent as an empty string. */
   const handleUpdate = async () => {
     setSaving(true); setError("");
     try {
@@ -108,8 +113,8 @@ export default function Parties() {
     } finally { setSaving(false); }
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm("Are you sure you want to delete this user?")) return;
+  const handleDeleteConfirmed = async () => {
+    const { id } = confirm;
     setError("");
     try {
       await AdminService.deleteUser(id);
@@ -131,7 +136,8 @@ export default function Parties() {
     }), [users, search, roleFilter]);
 
   const columns = [
-    { field: "fullName", headerName: "User Name", flex: 1.2, minWidth: 170,
+    {
+      field: "fullName", headerName: "User Name", flex: 1.2, minWidth: 170,
       renderCell: (p) => (
         <Stack justifyContent="center" sx={{ height: "100%" }}>
           <Typography variant="body2" noWrap>{p.value || "—"}</Typography>
@@ -139,9 +145,9 @@ export default function Parties() {
         </Stack>
       ),
     },
-    { field: "nickName",       headerName: "Alias / Nickname",  flex: 1, minWidth: 130 },
-    { field: "phoneNumber",    headerName: "Contact Phone",     width: 150 },
-    { field: "additionalInfo", headerName: "Additional Info",   flex: 1, minWidth: 140,
+    { field: "nickName",       headerName: "Alias / Nickname", flex: 1, minWidth: 130 },
+    { field: "phoneNumber",    headerName: "Contact Phone",    width: 150 },
+    { field: "additionalInfo", headerName: "Additional Info",  flex: 1, minWidth: 140,
       renderCell: (p) => p.value || "—" },
     { field: "role", headerName: "Role", width: 130,
       renderCell: (p) => <RoleChip role={p.value} /> },
@@ -153,14 +159,16 @@ export default function Parties() {
             <IconButton size="small" onClick={() => handleOpen(p.row)}><EditIcon fontSize="small" /></IconButton>
           </Tooltip>
           <Tooltip title="Delete user">
-            <IconButton size="small" color="error" onClick={() => handleDelete(p.row.id)}><DeleteIcon fontSize="small" /></IconButton>
+            <IconButton size="small" color="error"
+              onClick={() => setConfirm({ open: true, id: p.row.id })}>
+              <DeleteIcon fontSize="small" />
+            </IconButton>
           </Tooltip>
         </Stack>
       ),
     },
   ];
 
-  /* Role summaries */
   const admins    = users.filter((u) => u.role === "admin").length;
   const employees = users.filter((u) => u.role === "employee").length;
 
@@ -169,13 +177,8 @@ export default function Parties() {
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
 
       {/* ── Page Header ─────────────────────────────────────────────── */}
-      <Stack
-        direction={{ xs: "column", sm: "row" }}
-        justifyContent="space-between"
-        alignItems={{ sm: "center" }}
-        spacing={2}
-        sx={{ mb: 3 }}
-      >
+      <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between"
+        alignItems={{ sm: "center" }} spacing={2} sx={{ mb: 3 }}>
         <Box>
           <Typography variant="h5" gutterBottom>User Management</Typography>
           <Typography variant="body2" color="text.secondary">
@@ -190,44 +193,29 @@ export default function Parties() {
       {/* ── Summary Tiles ───────────────────────────────────────────── */}
       <Grid container spacing={2} className="stagger" sx={{ mb: 3 }}>
         <Grid size={{ xs: 12, sm: 6, lg: 4 }}><StatTile label="Total Users" value={users.length} icon={BadgeIcon} color="primary" /></Grid>
-        <Grid size={{ xs: 12, sm: 6, lg: 4 }}><StatTile label="Admins"      value={admins} icon={AdminPanelSettingsIcon} color="success" /></Grid>
-        <Grid size={{ xs: 12, sm: 6, lg: 4 }}><StatTile label="Employees"   value={employees} icon={PersonIcon} color="info" /></Grid>
+        <Grid size={{ xs: 12, sm: 6, lg: 4 }}><StatTile label="Admins"      value={admins}      icon={AdminPanelSettingsIcon} color="success" /></Grid>
+        <Grid size={{ xs: 12, sm: 6, lg: 4 }}><StatTile label="Employees"   value={employees}   icon={PersonIcon} color="info" /></Grid>
       </Grid>
 
       {/* ── Filters & Data Table ────────────────────────────────────── */}
       <Paper variant="outlined" sx={{ overflow: "hidden" }}>
-        <Stack
-          direction={{ xs: "column", sm: "row" }}
-          spacing={2}
-          alignItems={{ sm: "center" }}
-          sx={{ p: 2 }}
-        >
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems={{ sm: "center" }} sx={{ p: 2 }}>
           <TextField
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search by name, username or role"
             sx={{ minWidth: { sm: 280 }, flexGrow: 1 }}
             InputProps={{
-              startAdornment: (
-                <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>
-              ),
+              startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>,
               endAdornment: search ? (
                 <InputAdornment position="end">
-                  <IconButton size="small" onClick={() => setSearch("")}>
-                    <ClearIcon fontSize="small" />
-                  </IconButton>
+                  <IconButton size="small" onClick={() => setSearch("")}><ClearIcon fontSize="small" /></IconButton>
                 </InputAdornment>
               ) : null,
             }}
           />
-
-          <TextField
-            select
-            label="Role"
-            value={roleFilter}
-            onChange={(e) => setRoleFilter(e.target.value)}
-            sx={{ minWidth: 180 }}
-          >
+          <TextField select label="Role" value={roleFilter}
+            onChange={(e) => setRoleFilter(e.target.value)} sx={{ minWidth: 180 }}>
             <MenuItem value="all">All roles</MenuItem>
             {ROLES.map((r) => (
               <MenuItem key={r.value} value={r.value}>{r.label}</MenuItem>
@@ -237,24 +225,23 @@ export default function Parties() {
 
         <Divider />
 
-        {loading ? (
-          <Box sx={{ py: 10, display: "grid", placeItems: "center" }}>
-            <CircularProgress />
-          </Box>
-        ) : (
-          <Box sx={{ height: 560 }}>
-            <DataGrid
-              rows={filtered}
-              columns={columns}
-              getRowId={(r) => r.id}
-              disableRowSelectionOnClick
-              initialState={{ pagination: { paginationModel: { pageSize: 25 } } }}
-              pageSizeOptions={[10, 25, 50]}
-              localeText={{ noRowsLabel: "No users match the search criteria." }}
-              rowHeight={56}
-            />
-          </Box>
-        )}
+        <Box sx={{ height: 560 }}>
+          <DataGrid
+            rows={filtered}
+            columns={columns}
+            getRowId={(r) => r.id}
+            loading={loading}
+            disableRowSelectionOnClick
+            paginationModel={paginationModel}
+            onPaginationModelChange={setPaginationModel}
+            pageSizeOptions={[5, 10, 25, 50, 100]}
+            localeText={{
+              noRowsLabel: "No users match the search criteria.",
+              paginationDisplayedRows: paginationDisplayedRows(paginationModel),
+            }}
+            rowHeight={56}
+          />
+        </Box>
       </Paper>
 
       {/* ── Add / Edit Dialog ───────────────────────────────────────── */}
@@ -269,8 +256,7 @@ export default function Parties() {
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
               <TextField label="Password" name="password" type="password" fullWidth
-                required={!isEditing}
-                autoComplete="new-password"
+                required={!isEditing} autoComplete="new-password"
                 value={formData.password} onChange={handleChange}
                 helperText={isEditing ? "Leave blank to keep the current password" : ""} />
             </Grid>
@@ -308,6 +294,16 @@ export default function Parties() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* ── Delete Confirmation ──────────────────────────────────────── */}
+      <ConfirmDialog
+        open={confirm.open}
+        title="Delete user?"
+        message="This will permanently remove the user account and all associated access. This action cannot be undone."
+        confirmLabel="Delete User"
+        onConfirm={handleDeleteConfirmed}
+        onClose={() => setConfirm((s) => ({ ...s, open: false }))}
+      />
     </Box>
   );
 }

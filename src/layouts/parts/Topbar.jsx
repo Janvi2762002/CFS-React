@@ -14,10 +14,13 @@ import { useAuth } from "../../common/AuthContext";
 import { useColorMode } from "../../theme/ThemeModeProvider";
 
 const PAGE_TITLES = {
-  "/dashboard":    { title: "Dashboard",      sub: "Real-time operational overview" },
-  "/transactions": { title: "Card Swipes",    sub: "Transaction & card management" },
-  "/payments":     { title: "Party Payments", sub: "Cash flow & settlement summary" },
-  "/parties":      { title: "User Management",sub: "System access & role control" },
+  "/dashboard":     { title: "Dashboard",         sub: "Real-time operational overview" },
+  "/transactions":  { title: "Card Swipes",       sub: "Swipe transaction register" },
+  "/payments":      { title: "Card Payments",     sub: "Party payment summaries & settlements" },
+  "/users":         { title: "User Management",   sub: "System access & role control" },
+  "/stock-items":   { title: "Stock Items",       sub: "Inventory & stock movement" },
+  "/stock-payments":{ title: "Stock Payments",    sub: "Payments for stock items" },
+  "/cash-ledger":   { title: "Cash Ledger",       sub: "Incoming and outgoing cash register" },
 };
 
 const ROLE_LABEL = { master: "Master Administrator", admin: "Admin Controller", employee: "Employee Staff" };

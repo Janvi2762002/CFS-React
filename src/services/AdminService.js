@@ -1,8 +1,9 @@
 import apiClient, { unwrap } from "./apiClient";
 import { toApiRole, toAppRole } from "./AuthService";
+import { normaliseList, pageParams, toArray } from "./paginate";
 
 /**
- * Users and CardInfo endpoints.
+ * Users, CardInfo, and PaymentInfo endpoints.
  *
  * Every method returns the business data straight out of `resultObject` and
  * throws an ApiError on failure — there is deliberately no local fallback,
@@ -46,6 +47,12 @@ function toApiCard(card) {
     limitUsed: Boolean(card.limitUsed),
     additionalInfo: card.additionalInfo || null,
     bankName: card.bankName || null,
+    // Fields added to the CardInfo model server-side.
+    imei: card.imei?.trim() || null,
+    model: card.model?.trim() || null,
+    merchant: card.merchant?.trim() || null,
+    swipePerson: card.swipePerson?.trim() || null,
+    profit: card.profit === "" || card.profit == null ? null : Number(card.profit),
   };
 }
 
@@ -53,8 +60,9 @@ class AdminService {
   /* ── Users (Master / Admin only) ───────────────────────────────────── */
 
   async getUsers() {
-    const data = unwrap(await apiClient.get("/Users"));
-    return (Array.isArray(data) ? data : []).map(toAppUser);
+    // /Users returns { items, pagination } — never a bare array.
+    const raw = unwrap(await apiClient.get("/Users"));
+    return toArray(raw).map(toAppUser);
   }
 
   async getUserById(userId) {
@@ -66,7 +74,6 @@ class AdminService {
   }
 
   async updateUser(userId, user) {
-    // The route id and the body id must agree.
     const payload = { ...toApiUser(user), id: Number(userId) };
     return toAppUser(unwrap(await apiClient.put(`/Users/${userId}`, payload)));
   }
@@ -75,11 +82,26 @@ class AdminService {
     return unwrap(await apiClient.delete(`/Users/${userId}`)) === true;
   }
 
-  /* ── CardInfo (any authenticated user) ─────────────────────────────── */
+  /* ── CardInfo ────────────────────────────────────────────────────────── */
 
+  /**
+   * Fetch all card swipes as a plain array.
+   * Used by Dashboard.jsx (existing code, backward-compatible).
+   */
   async getCardInfo() {
-    const data = unwrap(await apiClient.get("/CardInfo"));
-    return Array.isArray(data) ? data : [];
+    return toArray(unwrap(await apiClient.get("/CardInfo")));
+  }
+
+  /**
+   * Fetch card swipes with server-side pagination.
+   * Returns { data: [], total: number, next, previous }.
+   * @param {{ page?: number, pageSize?: number }} params  — 1-indexed page
+   */
+  async getCardInfoPaginated({ page = 1, pageSize = 25 } = {}) {
+    const raw = unwrap(
+      await apiClient.get("/CardInfo", { params: pageParams({ page, pageSize }) })
+    );
+    return normaliseList(raw, page, pageSize);
   }
 
   async getCardById(cardId) {
@@ -97,6 +119,20 @@ class AdminService {
 
   async deleteCard(cardId) {
     return unwrap(await apiClient.delete(`/CardInfo/${cardId}`)) === true;
+  }
+
+  /* ── PaymentInfo (party-wise payment summary from backend) ──────────── */
+
+  /**
+   * Fetch the pre-computed party payment summary from the backend.
+   * Returns { data: [], total: number, next, previous }.
+   * @param {{ page?: number, pageSize?: number }} params  — 1-indexed page
+   */
+  async getPaymentInfo({ page = 1, pageSize = 25 } = {}) {
+    const raw = unwrap(
+      await apiClient.get("/PaymentInfo", { params: pageParams({ page, pageSize }) })
+    );
+    return normaliseList(raw, page, pageSize);
   }
 }
 

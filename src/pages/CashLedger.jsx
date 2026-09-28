@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Box, Button, Dialog, DialogActions, DialogContent, DialogTitle,
   TextField, Typography, IconButton, useMediaQuery, MenuItem,
-  CircularProgress, Stack, Paper, Divider, Grid, Alert, InputAdornment, Tooltip
+  Stack, Paper, Divider, Grid, Alert, InputAdornment, Tooltip
 } from "@mui/material";
 import { DataGrid } from "@mui/x-data-grid";
 import EditIcon from "@mui/icons-material/EditOutlined";
@@ -12,43 +12,53 @@ import AddIcon from "@mui/icons-material/Add";
 import ClearIcon from "@mui/icons-material/Clear";
 import AccountBalanceWalletIcon from "@mui/icons-material/AccountBalanceWalletOutlined";
 import StatTile from "../components/StatTile";
+import ConfirmDialog from "../components/ConfirmDialog";
 import CashLedgerService from "../services/CashLedgerService";
 import { useAuth } from "../common/AuthContext";
+import { paginationDisplayedRows } from "../components/gridPagination";
 
 export default function CashLedger() {
   const { user } = useAuth();
-  const [entries, setEntries] = useState([]);
-  const [totals, setTotals] = useState({ opening: 0, in: 0, out: 0, current: 0 });
-  const [loading, setLoading] = useState(true);
-  const [open, setOpen] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
-  const [search, setSearch] = useState("");
-  const [typeFilter, setTypeFilter] = useState("all");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
-  const [formData, setFormData] = useState({});
+  const [entries,         setEntries]         = useState([]);
+  const [rowCount,        setRowCount]        = useState(0);
+  const [paginationModel, setPaginationModel] = useState({ page: 0, pageSize: 25 });
+  const [totals,          setTotals]          = useState({ opening: 0, in: 0, out: 0, current: 0 });
+  const [loading,         setLoading]         = useState(true);
+  const [open,            setOpen]            = useState(false);
+  const [isEditing,       setIsEditing]       = useState(false);
+  const [search,          setSearch]          = useState("");
+  const [typeFilter,      setTypeFilter]      = useState("all");
+  const [saving,          setSaving]          = useState(false);
+  const [error,           setError]           = useState("");
+  const [formData,        setFormData]        = useState({});
+  const [confirm,         setConfirm]         = useState({ open: false, id: null });
   const isMobile = useMediaQuery("(max-width:768px)");
 
-  useEffect(() => { loadData(); }, []);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const [list, op, tin, tout, cur] = await Promise.all([
-        CashLedgerService.getEntries(),
+      const [{ data, total }, op, tin, tout, cur] = await Promise.all([
+        CashLedgerService.getEntriesPaginated({
+          page: paginationModel.page + 1,
+          pageSize: paginationModel.pageSize,
+        }),
         CashLedgerService.getOpeningTotal(),
         CashLedgerService.getInTotal(),
         CashLedgerService.getOutTotal(),
-        CashLedgerService.getCurrentBalance()
+        CashLedgerService.getCurrentBalance(),
       ]);
-      setEntries(list || []);
+      setEntries(data || []);
+      setRowCount(total);
       setTotals({ opening: op || 0, in: tin || 0, out: tout || 0, current: cur || 0 });
     } catch (e) {
       setEntries([]);
+      setRowCount(0);
       setError(e?.message || "Could not load cash ledger data.");
     } finally { setLoading(false); }
-  };
+  }, [paginationModel]);
+
+  useEffect(() => { loadData(); }, [loadData]);
 
   const handleOpen = (item = null) => {
     if (item) {
@@ -99,7 +109,11 @@ export default function CashLedger() {
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm("Are you sure you want to delete this entry?")) return;
+    setConfirm({ open: true, id });
+  };
+
+  const handleDeleteConfirmed = async () => {
+    const { id } = confirm;
     setError("");
     try {
       await CashLedgerService.deleteEntry(id);
@@ -109,6 +123,7 @@ export default function CashLedger() {
     }
   };
 
+  /* Client-side search/filter on the current page */
   const filtered = useMemo(() => {
     return entries.filter((i) => {
       const q = search.toLowerCase();
@@ -119,12 +134,12 @@ export default function CashLedger() {
   }, [entries, search, typeFilter]);
 
   const columns = [
-    { field: "transactionDate", headerName: "Date", width: 120, valueGetter: (p) => p ? p.split("T")[0] : "" },
-    { field: "transactionType", headerName: "Type", width: 120 },
-    { field: "name", headerName: "Name / Party", flex: 1, minWidth: 150 },
-    { field: "amount", headerName: "Amount", width: 120, type: "number" },
-    { field: "remarks", headerName: "Remarks", flex: 1, minWidth: 150 },
-    { field: "createdBy", headerName: "Created By", width: 120 },
+    { field: "transactionDate", headerName: "Date",         width: 120, valueGetter: (p) => p ? p.split("T")[0] : "" },
+    { field: "transactionType", headerName: "Type",         width: 120 },
+    { field: "name",            headerName: "Name / Party", flex: 1, minWidth: 150 },
+    { field: "amount",          headerName: "Amount",       width: 120, type: "number" },
+    { field: "remarks",         headerName: "Remarks",      flex: 1, minWidth: 150 },
+    { field: "createdBy",       headerName: "Created By",   width: 120 },
     {
       field: "actions", headerName: "Actions", width: 100, sortable: false, align: "right", headerAlign: "right",
       renderCell: (p) => (
@@ -156,8 +171,8 @@ export default function CashLedger() {
 
       <Grid container spacing={2} className="stagger" sx={{ mb: 3 }}>
         <Grid size={{ xs: 12, sm: 6, md: 3 }}><StatTile label="Opening Balance" value={`₹${totals.opening.toLocaleString()}`} icon={AccountBalanceWalletIcon} color="primary" /></Grid>
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}><StatTile label="Total IN" value={`₹${totals.in.toLocaleString()}`} icon={AccountBalanceWalletIcon} color="success" /></Grid>
-        <Grid size={{ xs: 12, sm: 6, md: 3 }}><StatTile label="Total OUT" value={`₹${totals.out.toLocaleString()}`} icon={AccountBalanceWalletIcon} color="error" /></Grid>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}><StatTile label="Total IN"        value={`₹${totals.in.toLocaleString()}`}      icon={AccountBalanceWalletIcon} color="success" /></Grid>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}><StatTile label="Total OUT"       value={`₹${totals.out.toLocaleString()}`}     icon={AccountBalanceWalletIcon} color="error" /></Grid>
         <Grid size={{ xs: 12, sm: 6, md: 3 }}><StatTile label="Current Balance" value={`₹${totals.current.toLocaleString()}`} icon={AccountBalanceWalletIcon} color="info" /></Grid>
       </Grid>
 
@@ -185,21 +200,25 @@ export default function CashLedger() {
 
         <Divider />
 
-        {loading ? (
-          <Box sx={{ py: 10, display: "grid", placeItems: "center" }}><CircularProgress /></Box>
-        ) : (
-          <Box sx={{ height: 560 }}>
-            <DataGrid
-              rows={filtered}
-              columns={columns}
-              getRowId={(r) => r.id}
-              disableRowSelectionOnClick
-              initialState={{ pagination: { paginationModel: { pageSize: 25 } } }}
-              pageSizeOptions={[10, 25, 50]}
-              rowHeight={56}
-            />
-          </Box>
-        )}
+        <Box sx={{ height: 560 }}>
+          <DataGrid
+            rows={filtered}
+            columns={columns}
+            rowCount={rowCount}
+            loading={loading}
+            paginationMode="server"
+            paginationModel={paginationModel}
+            onPaginationModelChange={setPaginationModel}
+            pageSizeOptions={[5, 10, 25, 50, 100]}
+            getRowId={(r) => r.id}
+            disableRowSelectionOnClick
+            localeText={{
+              noRowsLabel: "No cash ledger entries found.",
+              paginationDisplayedRows: paginationDisplayedRows(paginationModel),
+            }}
+            rowHeight={56}
+          />
+        </Box>
       </Paper>
 
       <Dialog open={open} onClose={() => setOpen(false)} maxWidth="sm" fullWidth fullScreen={isMobile}>
@@ -217,15 +236,12 @@ export default function CashLedger() {
                 <MenuItem value="OUT">OUT</MenuItem>
               </TextField>
             </Grid>
-
             <Grid size={12}>
               <TextField label="Name / Party" name="name" required fullWidth value={formData.name} onChange={handleChange} />
             </Grid>
-
             <Grid size={12}>
               <TextField label="Amount" name="amount" type="number" required fullWidth value={formData.amount} onChange={handleChange} />
             </Grid>
-
             <Grid size={12}>
               <TextField label="Remarks" name="remarks" fullWidth multiline minRows={2} value={formData.remarks} onChange={handleChange} />
             </Grid>
@@ -239,6 +255,15 @@ export default function CashLedger() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <ConfirmDialog
+        open={confirm.open}
+        title="Delete cash ledger entry?"
+        message="This action cannot be undone. Are you sure you want to delete this cash ledger entry?"
+        confirmLabel="Delete Entry"
+        onConfirm={handleDeleteConfirmed}
+        onClose={() => setConfirm((s) => ({ ...s, open: false }))}
+      />
     </Box>
   );
 }
