@@ -1,11 +1,34 @@
 import apiClient, { unwrap } from "./apiClient";
-import { normaliseList, pageParams, toArray } from "./paginate";
+import { fetchAllPages, normaliseList, pageParams, toArray } from "./paginate";
+import { toApiDate, toApiNumber, toApiText } from "./payload";
+
+/** Shape a stock item to the documented StockItem contract. */
+function toApiStockItem(item) {
+  return {
+    ...(item.id != null ? { id: Number(item.id) } : {}),
+    no: item.no?.trim() ?? "",
+    inDate: toApiDate(item.inDate),
+    outDate: toApiDate(item.outDate),
+    imei: toApiText(item.imei),
+    colour: toApiText(item.colour),
+    model: toApiText(item.model),
+    gstMrp: toApiNumber(item.gstMrp),
+    amount: toApiNumber(item.amount),
+    partyName: toApiText(item.partyName),
+    payment: toApiText(item.payment),
+    inOut: toApiText(item.inOut),
+    status: toApiText(item.status),
+    soldTo: toApiText(item.soldTo),
+    remarks: toApiText(item.remarks),
+  };
+}
 
 class StockItemService {
-  /** Fetch all stock items as a plain array (backward-compatible). Guaranteed to return an array. */
+  /** Fetch every stock item as a plain array, across all server pages. */
   async getItems() {
-    const response = await apiClient.get("/StockItem");
-    return toArray(unwrap(response));
+    return fetchAllPages(
+      async (params) => unwrap(await apiClient.get("/StockItem", { params }))
+    );
   }
 
   /**
@@ -41,12 +64,13 @@ class StockItemService {
   }
 
   async saveItem(data) {
-    const response = await apiClient.post("/StockItem", data);
+    const response = await apiClient.post("/StockItem", toApiStockItem(data));
     return unwrap(response);
   }
 
   async updateItem(id, data) {
-    const response = await apiClient.put(`/StockItem/${id}`, data);
+    const payload = { ...toApiStockItem(data), id: Number(id) };
+    const response = await apiClient.put(`/StockItem/${id}`, payload);
     return unwrap(response);
   }
 

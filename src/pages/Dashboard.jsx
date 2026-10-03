@@ -26,7 +26,12 @@ import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 import StatTile from "../components/StatTile";
 import AdminService from "../services/AdminService";
 
-const PROFIT_PER_SWIPE = 300;
+/* Profit comes from each swipe's recorded `profit`. Swipes saved before that
+   field existed carry none and count at the old flat rate, so earlier periods
+   do not read as a collapse in profit. */
+const FALLBACK_PROFIT_PER_SWIPE = 300;
+const hasProfit = (r) => r.profit != null && r.profit !== "";
+const profitOf  = (r) => (hasProfit(r) ? Number(r.profit) || 0 : FALLBACK_PROFIT_PER_SWIPE);
 
 const PERIODS = [
   { id: "today",     label: "Today" },
@@ -189,8 +194,9 @@ export default function Dashboard() {
   const totals = (rows) => ({
     swipes:  rows.length,
     volume:  rows.reduce((s, r) => s + (Number(r.deduction) || 0), 0),
-    profit:  rows.length * PROFIT_PER_SWIPE,
+    profit:  rows.reduce((s, r) => s + profitOf(r), 0),
     pending: rows.filter((r) => !r.limitUsed).reduce((s, r) => s + (Number(r.deduction) || 0), 0),
+    estimated: rows.filter((r) => !hasProfit(r)).length,
   });
 
   const now  = totals(current);
@@ -230,16 +236,16 @@ export default function Dashboard() {
     const buckets = new Map();
     current.forEach((r) => {
       const { key, label } = bucketOf(r._d);
-      const b = buckets.get(key) || { key, label, volume: 0, swipes: 0 };
+      const b = buckets.get(key) || { key, label, volume: 0, swipes: 0, profit: 0 };
       b.volume += Number(r.deduction) || 0;
       b.swipes += 1;
+      b.profit += profitOf(r);
       buckets.set(key, b);
     });
 
     return [...buckets.values()]
       .sort((a, b) => a.key.localeCompare(b.key))
-      .slice(-14)
-      .map((b) => ({ ...b, profit: b.swipes * PROFIT_PER_SWIPE }));
+      .slice(-14);
   }, [current, grain]);
 
   const grainLabel = grain === "hour" ? "hour" : grain === "day" ? "day" : "month";
@@ -340,7 +346,9 @@ export default function Dashboard() {
         <Grid size={{ xs: 12, sm: 6, lg: 3 }}>
           <StatTile
             label="Net Profit" value={inr(now.profit)}
-            hint={`₹${PROFIT_PER_SWIPE} earned per swipe`}
+            hint={now.estimated
+              ? `${now.estimated.toLocaleString()} swipe${now.estimated === 1 ? "" : "s"} without a recorded profit counted at ₹${FALLBACK_PROFIT_PER_SWIPE}`
+              : "From recorded swipe profits"}
             delta={delta(now.profit, prev.profit)}
             icon={TrendingUpIcon} color="success"
           />

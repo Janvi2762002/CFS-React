@@ -16,6 +16,8 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import CashLedgerService from "../services/CashLedgerService";
 import { useAuth } from "../common/AuthContext";
 import { paginationDisplayedRows } from "../components/gridPagination";
+import { formatGridDate } from "../components/gridDate";
+import { toLocalDateTime } from "../services/payload";
 
 export default function CashLedger() {
   const { user } = useAuth();
@@ -67,14 +69,14 @@ export default function CashLedger() {
         transactionDate: item.transactionDate ? item.transactionDate.split("T")[0] : "",
         transactionType: item.transactionType || "IN",
         name: item.name || "",
-        amount: item.amount || "",
+        amount: item.amount ?? "",
         remarks: item.remarks || "",
         createdBy: item.createdBy || ""
       });
       setIsEditing(true);
     } else {
       setFormData({
-        transactionDate: new Date().toISOString().split("T")[0],
+        transactionDate: toLocalDateTime(new Date()).slice(0, 10),
         transactionType: "IN", name: "", amount: "", remarks: "", createdBy: user?.username || ""
       });
       setIsEditing(false);
@@ -134,7 +136,7 @@ export default function CashLedger() {
   }, [entries, search, typeFilter]);
 
   const columns = [
-    { field: "transactionDate", headerName: "Date",         width: 120, valueGetter: (p) => p ? p.split("T")[0] : "" },
+    { field: "transactionDate", headerName: "Date",         width: 120, valueFormatter: (v) => formatGridDate(v) },
     { field: "transactionType", headerName: "Type",         width: 120 },
     { field: "name",            headerName: "Name / Party", flex: 1, minWidth: 150 },
     { field: "amount",          headerName: "Amount",       width: 120, type: "number" },

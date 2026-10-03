@@ -18,6 +18,11 @@ import AdminService from "../services/AdminService";
 import ConfirmDialog from "../components/ConfirmDialog";
 import { useAuth } from "../common/AuthContext";
 import { paginationDisplayedRows } from "../components/gridPagination";
+import { formatGridDate } from "../components/gridDate";
+import { toLocalDateTime } from "../services/payload";
+
+/* The whole register is loaded, so the grid can order it newest first. */
+const NEWEST_FIRST = { sorting: { sortModel: [{ field: "date", sort: "desc" }] } };
 
 const STATUS_FILTERS = [
   { id: "all",     label: "All statuses" },
@@ -105,9 +110,10 @@ export default function CardSwipes() {
     }
   };
 
-  const formatDate = (v) => {
-    if (!v) return "—";
-    return new Date(v).toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  /* datetime-local shows local wall-clock time, so feed it exactly that. */
+  const toInputValue = (v) => {
+    const d = v ? new Date(v) : null;
+    return d && !isNaN(d) ? toLocalDateTime(d).slice(0, 16) : "";
   };
 
   const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
@@ -153,7 +159,7 @@ export default function CardSwipes() {
   };
 
   const columns = [
-    { field: "date",      headerName: "Date",       width: 120, valueFormatter: (v) => formatDate(v) },
+    { field: "date",      headerName: "Date",       width: 120, valueFormatter: (v) => formatGridDate(v) },
     { field: "partyName", headerName: "Party Name", flex: 1.2, minWidth: 150,
       renderCell: (p) => p.value || "—" },
     {
@@ -269,6 +275,7 @@ export default function CardSwipes() {
           <DataGrid
             rows={filteredRows}
             columns={columns}
+            initialState={NEWEST_FIRST}
             loading={loading}
             paginationModel={paginationModel}
             onPaginationModelChange={setPaginationModel}
@@ -291,7 +298,7 @@ export default function CardSwipes() {
           <Grid container spacing={2} sx={{ mt: 0 }}>
             <Grid size={{ xs: 12, sm: 6 }}>
               <TextField label="Transaction Date" name="date" type="datetime-local" fullWidth
-                value={formData.date ? new Date(formData.date).toISOString().slice(0, 16) : ""}
+                value={toInputValue(formData.date)}
                 onChange={handleChange} InputLabelProps={{ shrink: true }} />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>

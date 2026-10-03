@@ -1,5 +1,24 @@
 import apiClient, { unwrap } from "./apiClient";
 import { normaliseList } from "./paginate";
+import { toApiDate, toApiNumber, toApiText } from "./payload";
+
+/* Newest first; entries on the same day fall back to the later id first. */
+const byNewest = (a, b) =>
+  (Date.parse(b.transactionDate) || 0) - (Date.parse(a.transactionDate) || 0) ||
+  (Number(b.id) || 0) - (Number(a.id) || 0);
+
+/** Shape an entry to the CashLedger contract (type is OPENING, IN or OUT). */
+function toApiEntry(entry) {
+  return {
+    ...(entry.id != null ? { id: Number(entry.id) } : {}),
+    transactionDate: toApiDate(entry.transactionDate),
+    transactionType: entry.transactionType,
+    name: toApiText(entry.name),
+    amount: toApiNumber(entry.amount) ?? 0,
+    remarks: toApiText(entry.remarks),
+    createdBy: toApiText(entry.createdBy),
+  };
+}
 
 class CashLedgerService {
   /** Fetch all entries as a plain array (backward-compatible). */
@@ -20,7 +39,9 @@ class CashLedgerService {
    */
   async getEntriesPaginated({ page = 1, pageSize = 25 } = {}) {
     const raw = unwrap(await apiClient.get("/CashLedger"));
-    return normaliseList(raw, page, pageSize);
+    // The window is cut locally, so order the full list before slicing it.
+    const ordered = Array.isArray(raw) ? [...raw].sort(byNewest) : raw;
+    return normaliseList(ordered, page, pageSize);
   }
 
   async getEntry(id) {
@@ -54,12 +75,13 @@ class CashLedgerService {
   }
 
   async saveEntry(data) {
-    const response = await apiClient.post("/CashLedger", data);
+    const response = await apiClient.post("/CashLedger", toApiEntry(data));
     return unwrap(response);
   }
 
   async updateEntry(id, data) {
-    const response = await apiClient.put(`/CashLedger/${id}`, data);
+    const payload = { ...toApiEntry(data), id: Number(id) };
+    const response = await apiClient.put(`/CashLedger/${id}`, payload);
     return unwrap(response);
   }
 

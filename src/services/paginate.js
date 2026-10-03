@@ -64,6 +64,30 @@ export function normaliseList(raw, page = 1, pageSize = 25) {
   };
 }
 
+/**
+ * Every row of a paged list endpoint, for screens that aggregate or search the
+ * whole collection (Dashboard, Card Swipes, Users, pick lists).
+ *
+ * Calling a paged endpoint with no parameters returns only the server's
+ * default first page, which silently truncates those screens. This reads
+ * page 1, then fetches the remaining pages the server reports.
+ *
+ * @param {(params: object) => Promise<any>} fetchPage — unwrapped GET for one page
+ */
+export async function fetchAllPages(fetchPage, pageSize = 100) {
+  const raw = await fetchPage(pageParams({ page: 1, pageSize }));
+  if (Array.isArray(raw)) return raw; // unpaged endpoint: already everything
+
+  const first = normaliseList(raw, 1, pageSize);
+  const pages = [];
+  for (let page = 2; page <= first.totalPages; page += 1) pages.push(page);
+
+  const rest = await Promise.all(
+    pages.map(async (page) => toArray(await fetchPage(pageParams({ page, pageSize }))))
+  );
+  return [first.data, ...rest].flat();
+}
+
 /** Pull just the rows out of a list response, paged or not. */
 export function toArray(raw) {
   if (Array.isArray(raw)) return raw;

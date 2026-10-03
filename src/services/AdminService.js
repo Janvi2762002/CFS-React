@@ -1,6 +1,7 @@
 import apiClient, { unwrap } from "./apiClient";
 import { toApiRole, toAppRole } from "./AuthService";
-import { normaliseList, pageParams, toArray } from "./paginate";
+import { fetchAllPages, normaliseList, pageParams } from "./paginate";
+import { toApiDate } from "./payload";
 
 /**
  * Users, CardInfo, and PaymentInfo endpoints.
@@ -41,7 +42,7 @@ function toApiCard(card) {
     cardNumber: card.cardNumber != null ? String(card.cardNumber).trim() : "",
     partyName: card.partyName?.trim() || null,
     deduction: card.deduction === "" || card.deduction == null ? null : Number(card.deduction),
-    date: card.date ? new Date(card.date).toISOString() : null,
+    date: toApiDate(card.date),
     pos: card.pos || null,
     remarks: card.remarks || null,
     limitUsed: Boolean(card.limitUsed),
@@ -60,9 +61,11 @@ class AdminService {
   /* ── Users (Master / Admin only) ───────────────────────────────────── */
 
   async getUsers() {
-    // /Users returns { items, pagination } — never a bare array.
-    const raw = unwrap(await apiClient.get("/Users"));
-    return toArray(raw).map(toAppUser);
+    // /Users is paged; the screen searches and filters the full list.
+    const rows = await fetchAllPages(
+      async (params) => unwrap(await apiClient.get("/Users", { params }))
+    );
+    return rows.map(toAppUser);
   }
 
   async getUserById(userId) {
@@ -85,11 +88,13 @@ class AdminService {
   /* ── CardInfo ────────────────────────────────────────────────────────── */
 
   /**
-   * Fetch all card swipes as a plain array.
-   * Used by Dashboard.jsx (existing code, backward-compatible).
+   * Fetch every card swipe as a plain array, across all server pages.
+   * Dashboard.jsx and CardSwipes.jsx aggregate and search the whole register.
    */
   async getCardInfo() {
-    return toArray(unwrap(await apiClient.get("/CardInfo")));
+    return fetchAllPages(
+      async (params) => unwrap(await apiClient.get("/CardInfo", { params }))
+    );
   }
 
   /**
@@ -125,14 +130,24 @@ class AdminService {
 
   /**
    * Fetch the pre-computed party payment summary from the backend.
+   * Rows carry: id, date, partyName, swipeCount, swipeAmount, totalAmount,
+   * profit, totalProfit, limitUsed, cardName, merchant, swipePerson, remarks.
    * Returns { data: [], total: number, next, previous }.
-   * @param {{ page?: number, pageSize?: number }} params  — 1-indexed page
+   * @param {{ page?: number, pageSize?: number, partyName?: string }} params  — 1-indexed page
    */
-  async getPaymentInfo({ page = 1, pageSize = 25 } = {}) {
-    const raw = unwrap(
-      await apiClient.get("/PaymentInfo", { params: pageParams({ page, pageSize }) })
-    );
+  async getPaymentInfo({ page = 1, pageSize = 25, partyName } = {}) {
+    const params = pageParams({ page, pageSize });
+    if (partyName?.trim()) params.partyName = partyName.trim();
+    const raw = unwrap(await apiClient.get("/PaymentInfo", { params }));
     return normaliseList(raw, page, pageSize);
+  }
+
+  /** Every PaymentInfo row matching the party filter, for statement export. */
+  async getAllPaymentInfo({ partyName } = {}) {
+    const filter = partyName?.trim() ? { partyName: partyName.trim() } : {};
+    return fetchAllPages(async (params) =>
+      unwrap(await apiClient.get("/PaymentInfo", { params: { ...params, ...filter } }))
+    );
   }
 }
 

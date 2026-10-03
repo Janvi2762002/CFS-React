@@ -16,6 +16,8 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import StockPaymentInfoService from "../services/StockPaymentInfoService";
 import StockItemService from "../services/StockItemService";
 import { paginationDisplayedRows } from "../components/gridPagination";
+import { formatGridDate } from "../components/gridDate";
+import { toLocalDateTime } from "../services/payload";
 
 export default function StockPayments() {
   const [payments,        setPayments]        = useState([]);
@@ -26,6 +28,7 @@ export default function StockPayments() {
   const [open,            setOpen]            = useState(false);
   const [isEditing,       setIsEditing]       = useState(false);
   const [search,          setSearch]          = useState("");
+  const [inOutFilter,     setInOutFilter]     = useState("all");
   const [saving,          setSaving]          = useState(false);
   const [error,           setError]           = useState("");
   const [formData,        setFormData]        = useState({});
@@ -36,26 +39,38 @@ export default function StockPayments() {
     setLoading(true);
     setError("");
     try {
-      const [{ data, total }, rawItems] = await Promise.all([
-        StockPaymentInfoService.getPaymentsPaginated({
-          page: paginationModel.page + 1,
-          pageSize: paginationModel.pageSize,
-        }),
-        StockItemService.getItems(),
-      ]);
+      const { data, total } = await StockPaymentInfoService.getPaymentsPaginated({
+        page: paginationModel.page + 1,
+        pageSize: paginationModel.pageSize,
+        inOut: inOutFilter,
+      });
       setPayments(Array.isArray(data) ? data : []);
       setRowCount(total || 0);
-      const itemsList = Array.isArray(rawItems) ? rawItems : rawItems?.items || rawItems?.data || [];
-      setStockItems(itemsList);
     } catch (e) {
       setPayments([]);
       setRowCount(0);
-      setStockItems([]);
       setError(e?.message || "Could not load data.");
     } finally { setLoading(false); }
-  }, [paginationModel]);
+  }, [paginationModel, inOutFilter]);
+
+  /* The full stock list feeds the picker and the Stock Item column. It spans
+     every server page, so load it once rather than on each page change. */
+  useEffect(() => {
+    StockItemService.getItems()
+      .then(setStockItems)
+      .catch((e) => {
+        setStockItems([]);
+        setError(e?.message || "Could not load stock items.");
+      });
+  }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  /* IN/OUT is filtered by the API, so a new filter starts from page one. */
+  const handleInOutFilter = (e) => {
+    setInOutFilter(e.target.value);
+    setPaginationModel((m) => (m.page === 0 ? m : { ...m, page: 0 }));
+  };
 
   const handleOpen = (item = null) => {
     if (item) {
@@ -65,10 +80,11 @@ export default function StockPayments() {
         accountName: item.accountName || "",
         accountNo: item.accountNo || "",
         ifsc: item.ifsc || "",
-        amount: item.amount || "",
+        amount: item.amount ?? "",
         date: item.date ? item.date.split("T")[0] : "",
         partyName: item.partyName || "",
         bank: item.bank || "",
+        inOut: item.inOut || "",
         remarks: item.remarks || "",
         stockItemId: item.stockItemId || ""
       });
@@ -76,7 +92,7 @@ export default function StockPayments() {
     } else {
       setFormData({
         no: "", accountName: "", accountNo: "", ifsc: "", amount: "",
-        date: new Date().toISOString().split("T")[0], partyName: "", bank: "", remarks: "", stockItemId: ""
+        date: toLocalDateTime(new Date()).slice(0, 10), partyName: "", bank: "", inOut: "", remarks: "", stockItemId: ""
       });
       setIsEditing(false);
     }
@@ -134,13 +150,26 @@ export default function StockPayments() {
     });
   }, [payments, search]);
 
+  const stockLabel = useMemo(() => {
+    const byId = new Map((Array.isArray(stockItems) ? stockItems : []).map((s) => [s.id, s]));
+    return (id) => {
+      const s = byId.get(id);
+      return s ? `${s.no}${s.model ? ` - ${s.model}` : ""}` : (id ? `#${id}` : "");
+    };
+  }, [stockItems]);
+
   const columns = [
+    { field: "date",        headerName: "Date",         width: 120, valueFormatter: (v) => formatGridDate(v) },
     { field: "no",          headerName: "No.",          width: 100 },
+    { field: "inOut",       headerName: "IN/OUT",       width: 90 },
     { field: "partyName",   headerName: "Party Name",   flex: 1, minWidth: 150 },
     { field: "accountName", headerName: "Account Name", flex: 1, minWidth: 150 },
+    { field: "accountNo",   headerName: "Account No.",  width: 150 },
+    { field: "ifsc",        headerName: "IFSC",         width: 120 },
     { field: "bank",        headerName: "Bank",         width: 120 },
     { field: "amount",      headerName: "Amount",       width: 120, type: "number" },
-    { field: "date",        headerName: "Date",         width: 120, valueGetter: (p) => p ? p.split("T")[0] : "" },
+    { field: "stockItemId", headerName: "Stock Item",   width: 170, valueGetter: (v) => stockLabel(v) },
+    { field: "remarks",     headerName: "Remarks",      flex: 1, minWidth: 150 },
     {
       field: "actions", headerName: "Actions", width: 100, sortable: false, align: "right", headerAlign: "right",
       renderCell: (p) => (
@@ -192,6 +221,11 @@ export default function StockPayments() {
               ) : null,
             }}
           />
+          <TextField select label="IN/OUT" value={inOutFilter} onChange={handleInOutFilter} sx={{ minWidth: 120 }}>
+            <MenuItem value="all">All</MenuItem>
+            <MenuItem value="IN">IN</MenuItem>
+            <MenuItem value="OUT">OUT</MenuItem>
+          </TextField>
         </Stack>
 
         <Divider />
@@ -222,14 +256,20 @@ export default function StockPayments() {
         <Divider />
         <DialogContent>
           <Grid container spacing={2} sx={{ mt: 0 }}>
-            <Grid size={{ xs: 12, sm: 4 }}>
+            <Grid size={{ xs: 12, sm: 3 }}>
               <TextField label="No." name="no" required fullWidth value={formData.no} onChange={handleChange} />
             </Grid>
-            <Grid size={{ xs: 12, sm: 4 }}>
+            <Grid size={{ xs: 12, sm: 3 }}>
               <TextField label="Date" name="date" type="date" fullWidth InputLabelProps={{ shrink: true }} value={formData.date} onChange={handleChange} />
             </Grid>
-            <Grid size={{ xs: 12, sm: 4 }}>
+            <Grid size={{ xs: 12, sm: 3 }}>
               <TextField label="Amount" name="amount" type="number" required fullWidth value={formData.amount} onChange={handleChange} />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 3 }}>
+              <TextField select label="IN/OUT" name="inOut" fullWidth value={formData.inOut || ""} onChange={handleChange}>
+                <MenuItem value="IN">IN</MenuItem>
+                <MenuItem value="OUT">OUT</MenuItem>
+              </TextField>
             </Grid>
 
             <Grid size={{ xs: 12, sm: 6 }}>

@@ -15,6 +15,8 @@ import StatTile from "../components/StatTile";
 import ConfirmDialog from "../components/ConfirmDialog";
 import StockItemService from "../services/StockItemService";
 import { paginationDisplayedRows } from "../components/gridPagination";
+import { formatGridDate } from "../components/gridDate";
+import { toLocalDateTime } from "../services/payload";
 
 export default function StockItems() {
   const [items,           setItems]           = useState([]);
@@ -61,8 +63,8 @@ export default function StockItems() {
         imei: item.imei || "",
         colour: item.colour || "",
         model: item.model || "",
-        gstMrp: item.gstMrp || "",
-        amount: item.amount || "",
+        gstMrp: item.gstMrp ?? "",
+        amount: item.amount ?? "",
         partyName: item.partyName || "",
         payment: item.payment || "",
         inOut: item.inOut || "IN",
@@ -73,7 +75,7 @@ export default function StockItems() {
       setIsEditing(true);
     } else {
       setFormData({
-        no: "", inDate: new Date().toISOString().split("T")[0], outDate: "",
+        no: "", inDate: toLocalDateTime(new Date()).slice(0, 10), outDate: "",
         imei: "", colour: "", model: "", gstMrp: "", amount: "", partyName: "",
         payment: "Cash", inOut: "IN", status: "Available", soldTo: "", remarks: ""
       });
@@ -140,12 +142,19 @@ export default function StockItems() {
 
   const columns = [
     { field: "no",        headerName: "No.",        width: 100 },
+    { field: "inDate",    headerName: "IN Date",    width: 120, valueFormatter: (v) => formatGridDate(v) },
+    { field: "outDate",   headerName: "OUT Date",   width: 120, valueFormatter: (v) => formatGridDate(v) },
     { field: "model",     headerName: "Model",      flex: 1, minWidth: 150 },
+    { field: "colour",    headerName: "Colour",     width: 100 },
     { field: "imei",      headerName: "IMEI",       width: 150 },
     { field: "partyName", headerName: "Party Name", flex: 1, minWidth: 150 },
     { field: "inOut",     headerName: "IN/OUT",     width: 100 },
     { field: "status",    headerName: "Status",     width: 120 },
+    { field: "gstMrp",    headerName: "GST MRP",    width: 120, type: "number" },
     { field: "amount",    headerName: "Amount",     width: 120, type: "number" },
+    { field: "payment",   headerName: "Payment",    width: 110 },
+    { field: "soldTo",    headerName: "Sold To",    width: 140 },
+    { field: "remarks",   headerName: "Remarks",    flex: 1, minWidth: 150 },
     {
       field: "actions", headerName: "Actions", width: 100, sortable: false, align: "right", headerAlign: "right",
       renderCell: (p) => (
