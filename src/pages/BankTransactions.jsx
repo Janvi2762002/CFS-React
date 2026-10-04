@@ -263,13 +263,13 @@ export default function BankTransactions() {
   }, [transactions, search, typeFilter, accountOf, relatedOf]);
 
   const columns = [
-    { field: "transactionDate", headerName: "Date", width: 115, valueFormatter: (v) => formatGridDate(v) },
+    { field: "transactionDate", headerName: "Date", width: 108, valueFormatter: (v) => formatGridDate(v) },
     {
-      field: "accountId", headerName: "Account", flex: 1, minWidth: 150,
+      field: "accountId", headerName: "Account", flex: 1, minWidth: 110,
       valueGetter: (v, row) => accountLabel(accountOf(row)) || (v != null ? `Account #${v}` : ""),
     },
     {
-      field: "transactionType", headerName: "Type", width: 125, type: "singleSelect",
+      field: "transactionType", headerName: "Type", width: 115, type: "singleSelect",
       valueOptions: TRANSACTION_TYPES.map((t) => ({ value: t.value, label: t.label })),
       renderCell: (p) => (
         <Chip
@@ -283,7 +283,7 @@ export default function BankTransactions() {
     {
       /* The other side of a transfer rides under the description rather than
          in its own column, which kept Debit / Credit / Balance off-screen. */
-      field: "remarks", headerName: "Description", flex: 1.2, minWidth: 160,
+      field: "remarks", headerName: "Description", flex: 1.4, minWidth: 125,
       renderCell: (p) => {
         const other = relatedOf(p.row);
         const name = other ? accountLabel(other) || `Account #${other.id}` : "";
@@ -299,24 +299,24 @@ export default function BankTransactions() {
         );
       },
     },
-    { field: "referenceNo", headerName: "Reference", width: 115, renderCell: (p) => p.value || "—" },
+    { field: "referenceNo", headerName: "Reference", width: 95, renderCell: (p) => p.value || "—" },
     {
-      field: "debit", headerName: "Debit", type: "number", width: 115,
+      field: "debit", headerName: "Debit", type: "number", width: 105,
       valueGetter: (v, row) => (directionOf(row) === "debit" ? Number(row.amount) || 0 : null),
       renderCell: (p) => <Money value={p.value} tone="error.main" />,
     },
     {
-      field: "credit", headerName: "Credit", type: "number", width: 115,
+      field: "credit", headerName: "Credit", type: "number", width: 105,
       valueGetter: (v, row) => (directionOf(row) === "credit" ? Number(row.amount) || 0 : null),
       renderCell: (p) => <Money value={p.value} tone="success.main" />,
     },
     {
-      field: "balance", headerName: "Balance", type: "number", width: 125,
+      field: "balance", headerName: "Balance", type: "number", width: 115,
       description: "Running balance of the account after this transaction",
       renderCell: (p) => <Money value={p.value} tone={p.value < 0 ? "error.main" : "text.primary"} />,
     },
     {
-      field: "actions", headerName: "Actions", width: 90, sortable: false, filterable: false,
+      field: "actions", headerName: "Actions", width: 80, sortable: false, filterable: false,
       align: "right", headerAlign: "right",
       renderCell: (p) => (
         <Stack direction="row" spacing={0.5} justifyContent="flex-end">
@@ -482,7 +482,9 @@ export default function BankTransactions() {
 
         <Divider />
 
-        <Box sx={{ height: 580 }}>
+        {/* A flex-column parent lets the grid grow with its rows, so the page
+            scrolls instead of the grid clipping rows inside a fixed box. */}
+        <Box sx={{ display: "flex", flexDirection: "column" }}>
           <DataGrid
             rows={filtered}
             columns={columns}
