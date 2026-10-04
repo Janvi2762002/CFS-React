@@ -5,6 +5,8 @@ import {
   Typography, Tooltip, Stack, Chip, Divider, Avatar, ListSubheader, IconButton,
 } from "@mui/material";
 import DashboardIcon from "@mui/icons-material/DashboardOutlined";
+import AccountBalanceIcon from "@mui/icons-material/AccountBalanceOutlined";
+import SavingsIcon from "@mui/icons-material/SavingsOutlined";
 import CreditCardIcon from "@mui/icons-material/CreditCardOutlined";
 import AccountBalanceWalletIcon from "@mui/icons-material/AccountBalanceWalletOutlined";
 import Inventory2Icon from "@mui/icons-material/Inventory2Outlined";
@@ -23,6 +25,16 @@ const OVERVIEW = {
   tabId: "dashboard", label: "Overview",
   items: [
     { label: "Dashboard", path: "/dashboard", icon: DashboardIcon, masterOnly: true },
+  ],
+};
+
+/* Master and Admin only, directly under Overview. Employees never see it —
+   unlike Dashboard, it is not shown locked. */
+const BANK = {
+  tabId: "bank", label: "Accounts & Transactions",
+  items: [
+    { label: "Transactions", path: "/bank-transactions", icon: AccountBalanceIcon },
+    { label: "Bank Accounts", path: "/bank-accounts", icon: SavingsIcon },
   ],
 };
 
@@ -57,8 +69,8 @@ const ADMINISTRATION = {
 };
 
 const NAV = {
-  master:   [OVERVIEW, CARDS, STOCK, CASH, ADMINISTRATION],
-  admin:    [OVERVIEW, CARDS, STOCK, CASH],
+  master:   [OVERVIEW, BANK, CARDS, STOCK, CASH, ADMINISTRATION],
+  admin:    [OVERVIEW, BANK, CARDS, STOCK, CASH],
   employee: [OVERVIEW, CARDS],
 };
 

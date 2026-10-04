@@ -15,6 +15,8 @@ import { useColorMode } from "../../theme/ThemeModeProvider";
 
 const PAGE_TITLES = {
   "/dashboard":     { title: "Dashboard",         sub: "Real-time operational overview" },
+  "/bank-transactions": { title: "Transactions",  sub: "Bank account balances & transactions" },
+  "/bank-accounts": { title: "Bank Accounts",     sub: "Add and manage bank accounts" },
   "/transactions":  { title: "Card Swipes",       sub: "Swipe transaction register" },
   "/payments":      { title: "Card Payments",     sub: "Party payment summaries & settlements" },
   "/users":         { title: "User Management",   sub: "System access & role control" },

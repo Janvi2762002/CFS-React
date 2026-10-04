@@ -64,6 +64,12 @@ const STATUS_FALLBACK = {
 function messageFrom(error) {
   const data = error.response?.data;
   if (typeof data === "string" && data.trim()) return data;
+  /* ASP.NET model validation answers with a generic `title` and puts the
+     useful part ("The Amount field is required.") under `errors`. */
+  const fieldErrors = data?.errors && typeof data.errors === "object"
+    ? Object.values(data.errors).flat().filter((e) => typeof e === "string")
+    : [];
+  if (fieldErrors.length) return fieldErrors.join(" ");
   const msg = data?.message || data?.statusMessage || data?.title;
   if (msg) return msg;
   if (error.code === "ECONNABORTED") return "The server took too long to respond.";
