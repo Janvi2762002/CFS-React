@@ -50,7 +50,7 @@ export const AuthProvider = ({ children }) => {
 
       setUser(signedIn);
       setUserRole(signedIn.role);
-      navigate(signedIn.role === "master" ? "/dashboard" : "/transactions", { replace: true });
+      navigate(signedIn.role === "master" ? "/dashboard" : "/swipes", { replace: true });
       return { ok: true };
     } catch (error) {
       const message =

@@ -262,6 +262,28 @@ export function createAppTheme(mode = "light") {
         },
       },
     },
+
+    MuiTablePagination: {
+      styleOverrides: {
+        selectLabel: {
+          display: "block !important",
+          fontSize: "0.75rem",
+        },
+        input: {
+          display: "inline-flex !important",
+          marginRight: "8px !important",
+        },
+        toolbar: {
+          flexWrap: "wrap",
+          paddingLeft: "8px !important",
+          paddingRight: "8px !important",
+          minHeight: "48px",
+        },
+        spacer: {
+          display: "none !important",
+        },
+      },
+    },
   };
 
   return base;

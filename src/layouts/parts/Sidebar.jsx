@@ -41,7 +41,7 @@ const BANK = {
 const CARDS = {
   tabId: "cards", label: "Card Management",
   items: [
-    { label: "Card Swipes", path: "/transactions", icon: CreditCardIcon },
+    { label: "Card Swipes", path: "/swipes", icon: CreditCardIcon },
     { label: "Card Payments", path: "/payments", icon: ReceiptIcon },
   ],
 };

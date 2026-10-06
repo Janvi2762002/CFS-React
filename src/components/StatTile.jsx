@@ -11,7 +11,7 @@ import ArrowDownwardIcon from "@mui/icons-material/ArrowDownward";
  * width below them — putting all three side by side leaves the number a
  * narrow column, which is what made these feel cramped at smaller widths.
  */
-export default function StatTile({ label, value, hint, delta, icon: Icon, color = "primary" }) {
+export default function StatTile({ label, value, hint, delta, icon: Icon, color = "primary", onClick }) {
   const theme = useTheme();
   const tone = theme.palette[color].main;
 
@@ -20,7 +20,20 @@ export default function StatTile({ label, value, hint, delta, icon: Icon, color 
   const deltaTone = up ? theme.palette.success.main : theme.palette.error.main;
 
   return (
-    <Card variant="outlined" sx={{ height: "100%", position: "relative", overflow: "hidden" }}>
+    <Card
+      variant="outlined"
+      onClick={onClick}
+      sx={{
+        height: "100%",
+        position: "relative",
+        overflow: "hidden",
+        ...(onClick ? {
+          cursor: "pointer",
+          transition: "transform 0.15s ease, box-shadow 0.15s ease",
+          "&:hover": { transform: "translateY(-2px)", boxShadow: theme.shadows[2] },
+        } : {}),
+      }}
+    >
       {/* Colour rail identifying the metric */}
       <Box sx={{ position: "absolute", insetInlineStart: 0, top: 0, bottom: 0, width: 4, bgcolor: tone }} />
 

@@ -11,7 +11,11 @@ import InsightsIcon from "@mui/icons-material/InsightsOutlined";
 import ShieldIcon from "@mui/icons-material/VerifiedUserOutlined";
 import PaymentsIcon from "@mui/icons-material/PaymentsOutlined";
 import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
+import LightModeIcon from "@mui/icons-material/LightModeOutlined";
+import DarkModeIcon from "@mui/icons-material/DarkModeOutlined";
+import Tooltip from "@mui/material/Tooltip";
 import { useAuth } from "../common/AuthContext";
+import { useColorMode } from "../theme/ThemeModeProvider";
 
 const FEATURES = [
   { icon: CreditCardIcon, title: "Card swipe tracking", desc: "Every swipe, settlement and deduction, captured as it happens." },
@@ -43,6 +47,7 @@ function Orb({ size, color, sx, delay = "0s" }) {
 
 export default function LoginPage({ onLogin }) {
   const theme = useTheme();
+  const { mode, toggle } = useColorMode();
   const { handleLogin } = useAuth();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -69,12 +74,31 @@ export default function LoginPage({ onLogin }) {
   return (
     <Box
       sx={{
+        position: "relative",
         minHeight: "100vh",
         display: "grid",
         gridTemplateColumns: { xs: "1fr", md: "1.05fr 1fr" },
         bgcolor: "background.default",
       }}
     >
+      {/* Fixed Theme Toggle Button on Top Right */}
+      <Box sx={{ position: "fixed", top: 16, right: 16, zIndex: 1100 }}>
+        <Tooltip title={mode === "dark" ? "Switch to Light Theme" : "Switch to Dark Theme"}>
+          <IconButton
+            onClick={toggle}
+            sx={{
+              bgcolor: "background.paper",
+              color: "text.primary",
+              boxShadow: 3,
+              border: 1,
+              borderColor: "divider",
+              "&:hover": { bgcolor: "action.hover" },
+            }}
+          >
+            {mode === "dark" ? <LightModeIcon fontSize="small" /> : <DarkModeIcon fontSize="small" />}
+          </IconButton>
+        </Tooltip>
+      </Box>
       {/* ══ Brand panel ═══════════════════════════════════════════════════ */}
       <Box
         sx={{

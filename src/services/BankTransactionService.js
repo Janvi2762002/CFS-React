@@ -5,11 +5,8 @@ import { toApiDate, toApiNumber, toApiText } from "./payload";
 /**
  * Bank account transactions.
  *
- * Not in the API document; the contract follows the deployed Swagger. Each
- * row belongs to one account (`accountId`) and is read from that account's
- * side. `amount` is always positive — the direction comes from
- * `transactionType`, which the API restricts to the five values below.
- * Transfers name the other account in `relatedAccountId`.
+ * Supports single-account movements (OPENING, IN, OUT) via POST /api/BankTransaction
+ * and account-to-account transfers via POST /api/BankTransaction/transfer.
  */
 export const TRANSACTION_TYPES = [
   { value: "OPENING",      label: "Opening",      direction: "credit" },
@@ -29,12 +26,6 @@ export const directionOf = (row) =>
 
 /**
  * Attach each row's running account balance as `balance`.
- *
- * The API returns no balance per transaction, so it is rebuilt from the
- * account's history: oldest first (same-day rows by id), credits add and
- * debits subtract. The opening balance is itself an OPENING credit, so the
- * last row lands on the account's current balance. Valid only when the rows
- * hold an account's full history, which both list endpoints return.
  */
 export function withRunningBalance(rows) {
   const byAccount = new Map();
@@ -64,9 +55,7 @@ export function withRunningBalance(rows) {
 }
 
 /**
- * Shape a transaction to the BankTransaction contract. Only transfers carry
- * a related account; the `account` / `relatedAccount` objects the API may
- * return on reads are never sent back.
+ * Shape a transaction to the BankTransaction contract for single account movements.
  */
 function toApiTransaction(t) {
   const type = String(t.transactionType || "").toUpperCase();
@@ -84,18 +73,32 @@ function toApiTransaction(t) {
   };
 }
 
+/**
+ * Shape a transfer payload for POST /api/BankTransaction/transfer.
+ */
+function toApiTransfer(t) {
+  return {
+    fromAccountId: Number(t.fromAccountId || t.accountId),
+    toAccountId: Number(t.toAccountId || t.relatedAccountId),
+    transactionDate: toApiDate(t.transactionDate),
+    amount: toApiNumber(t.amount),
+    referenceNo: toApiText(t.referenceNo),
+    remarks: toApiText(t.remarks),
+  };
+}
+
 class BankTransactionService {
   /** Every transaction across all accounts. */
-  async getTransactions() {
+  async getTransactions(params) {
     return fetchAllPages(
-      async (params) => unwrap(await apiClient.get("/BankTransaction", { params }))
+      async (p) => unwrap(await apiClient.get("/BankTransaction", { params: { ...p, ...params } }))
     );
   }
 
   /** Every transaction of one account. */
-  async getByAccount(accountId) {
+  async getByAccount(accountId, params) {
     return fetchAllPages(
-      async (params) => unwrap(await apiClient.get(`/BankTransaction/account/${accountId}`, { params }))
+      async (p) => unwrap(await apiClient.get(`/BankTransaction/account/${accountId}`, { params: { ...p, ...params } }))
     );
   }
 
@@ -103,8 +106,19 @@ class BankTransactionService {
     return unwrap(await apiClient.get(`/BankTransaction/${id}`));
   }
 
+  /** Create a single account movement (OPENING, IN, OUT). */
   async createTransaction(data) {
     return unwrap(await apiClient.post("/BankTransaction", toApiTransaction(data)));
+  }
+
+  /** Transfer funds between two managed accounts via POST /api/BankTransaction/transfer. */
+  async createTransfer(data) {
+    return unwrap(await apiClient.post("/BankTransaction/transfer", toApiTransfer(data)));
+  }
+
+  /** Alias for createTransfer. */
+  async transfer(data) {
+    return this.createTransfer(data);
   }
 
   async updateTransaction(id, data) {

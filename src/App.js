@@ -1,6 +1,6 @@
-import React from "react";
-import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-dom";
-import { Box, CircularProgress } from "@mui/material";
+import React, { useState } from "react";
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
+import { Box, CircularProgress, Dialog, DialogTitle, DialogContent, DialogActions, Button, Typography } from "@mui/material";
 import ThemeModeProvider from "./theme/ThemeModeProvider";
 import BackdropBlur from "./theme/BackdropBlur";
 import { AuthProvider, useAuth } from "./common/AuthContext";
@@ -18,6 +18,39 @@ import CashLedger from "./pages/CashLedger";
 import BankTransactions from "./pages/BankTransactions";
 import BankAccounts from "./pages/BankAccounts";
 
+function UnauthenticatedPrompt() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [open, setOpen] = useState(true);
+
+  if (location.pathname === "/login") return null;
+
+  return (
+    <Box sx={{ minHeight: "100vh", display: "grid", placeItems: "center", bgcolor: "background.default", p: 2 }}>
+      <Dialog open={open} disableEscapeKeyDown maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontWeight: 600 }}>Sign-in Required</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary">
+            Your session has expired or you are not logged in. Please sign in to access the control centre.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2.5 }}>
+          <Button
+            variant="contained"
+            fullWidth
+            onClick={() => {
+              setOpen(false);
+              navigate("/login", { replace: true });
+            }}
+          >
+            Go to Login
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
+  );
+}
+
 function AppRoutes() {
   const { userRole, handleLogin, handleLogout, loading } = useAuth();
 
@@ -34,7 +67,7 @@ function AppRoutes() {
 
   /* Only the Master sees the analytics dashboard; everyone else starts on
      the swipe register. Used for post-login and catch-all redirects. */
-  const landingPath = isMaster ? "/dashboard" : "/transactions";
+  const landingPath = isMaster ? "/dashboard" : "/swipes";
 
   return (
     <Routes>
@@ -57,7 +90,8 @@ function AppRoutes() {
           />
 
           {/* Card Management pages */}
-          <Route path="/transactions" element={<CardSwipes />} />
+          <Route path="/swipes" element={<CardSwipes />} />
+          <Route path="/transactions" element={<Navigate to="/swipes" replace />} />
           <Route path="/payments"     element={<CardPayments />} />
 
           {/* Admin + Master: Accounts, Cash & Stock Management */}
@@ -85,7 +119,7 @@ function AppRoutes() {
           <Route path="/"  element={<Navigate to={landingPath} replace />} />
         </Route>
       ) : (
-        <Route path="*" element={<Navigate to="/login" replace />} />
+        <Route path="*" element={<UnauthenticatedPrompt />} />
       )}
     </Routes>
   );

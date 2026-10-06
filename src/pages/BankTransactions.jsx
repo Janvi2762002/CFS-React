@@ -225,8 +225,22 @@ export default function BankTransactions() {
     setSaving(true);
     setFormError("");
     try {
-      if (isEditing) await BankTransactionService.updateTransaction(formData.id, formData);
-      else await BankTransactionService.createTransaction(formData);
+      if (isEditing) {
+        await BankTransactionService.updateTransaction(formData.id, formData);
+      } else if (isTransfer(formData.transactionType)) {
+        const fromAccountId = formData.transactionType === "TRANSFER_IN" ? formData.relatedAccountId : formData.accountId;
+        const toAccountId = formData.transactionType === "TRANSFER_IN" ? formData.accountId : formData.relatedAccountId;
+        await BankTransactionService.createTransfer({
+          fromAccountId,
+          toAccountId,
+          transactionDate: formData.transactionDate,
+          amount: formData.amount,
+          referenceNo: formData.referenceNo,
+          remarks: formData.remarks,
+        });
+      } else {
+        await BankTransactionService.createTransaction(formData);
+      }
       setOpen(false);
       // Balances move with every transaction, so the cards refresh too.
       await Promise.all([loadAccounts({ quiet: true }), loadTransactions()]);

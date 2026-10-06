@@ -73,8 +73,6 @@ export default function MainLayout() {
             px: { xs: 2, sm: 3 },
             py: 3,
             width: "100%",
-            maxWidth: 1440,
-            mx: "auto",
           }}
         >
           <Outlet />
