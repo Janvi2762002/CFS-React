@@ -76,6 +76,7 @@ export default function BankTransactions() {
   const [transactions,     setTransactions]     = useState([]);
   const [txLoading,        setTxLoading]        = useState(true);
   const [txError,          setTxError]          = useState("");
+  const [txNotice,         setTxNotice]         = useState("");
   const [search,           setSearch]           = useState("");
   const [typeFilter,       setTypeFilter]       = useState(ALL);
   const [paginationModel,  setPaginationModel]  = useState({ page: 0, pageSize: 25 });
@@ -88,7 +89,7 @@ export default function BankTransactions() {
   const [formData,  setFormData]  = useState(emptyForm());
   const [saving,    setSaving]    = useState(false);
   const [formError, setFormError] = useState("");
-  const [confirm,   setConfirm]   = useState({ open: false, id: null });
+  const [confirm,   setConfirm]   = useState({ open: false, row: null });
   const isMobile = useMediaQuery("(max-width:768px)");
 
   /* `quiet` refreshes balances after a save without flashing the cards
@@ -253,14 +254,30 @@ export default function BankTransactions() {
   };
 
   const handleDeleteConfirmed = async () => {
-    const { id } = confirm;
+    const { row } = confirm;
+    if (!row) return;
     setTxError("");
+    setTxNotice("");
     try {
-      await BankTransactionService.deleteTransaction(id);
-      await Promise.all([loadAccounts({ quiet: true }), loadTransactions()]);
+      if (isTransfer(String(row.transactionType).toUpperCase())) {
+        // Both sides go, or the other account keeps a transfer that never happened.
+        const { pair } = await BankTransactionService.deleteTransfer(row);
+        if (!pair) {
+          setTxNotice(
+            `This side of the transfer was deleted, but its matching entry on ${accountLabel(relatedOf(row)) || "the other account"} ` +
+            "was not found. Check that account's transactions."
+          );
+        }
+      } else {
+        await BankTransactionService.deleteTransaction(row.id);
+      }
     } catch (e) {
-      setTxError(e?.message || "Could not delete the transaction.");
+      setTxError(e?.partial
+        ? `This side of the transfer was deleted, but the matching entry on ${accountLabel(relatedOf(row)) || "the other account"} could not be: ${e.message}`
+        : e?.message || "Could not delete the transaction.");
     }
+    // Reload even after a partial failure, so the grid shows what is really left.
+    await Promise.all([loadAccounts({ quiet: true }), loadTransactions()]);
   };
 
   /* ── Grid ───────────────────────────────────────────────────────────── */
@@ -334,11 +351,25 @@ export default function BankTransactions() {
       align: "right", headerAlign: "right",
       renderCell: (p) => (
         <Stack direction="row" spacing={0.5} justifyContent="flex-end">
-          <Tooltip title="Edit transaction">
-            <IconButton size="small" onClick={() => handleOpen(p.row)}><EditIcon fontSize="small" /></IconButton>
+          {/* The API cannot update a transfer as a whole, and editing one side
+              would put the two accounts out of step. */}
+          <Tooltip title={isTransfer(String(p.row.transactionType).toUpperCase())
+            ? "Transfers can't be edited. Delete it and add it again."
+            : "Edit transaction"}>
+            <span>
+              <IconButton
+                size="small"
+                aria-label="Edit transaction"
+                disabled={isTransfer(String(p.row.transactionType).toUpperCase())}
+                onClick={() => handleOpen(p.row)}
+              >
+                <EditIcon fontSize="small" />
+              </IconButton>
+            </span>
           </Tooltip>
           <Tooltip title="Delete transaction">
-            <IconButton size="small" color="error" onClick={() => setConfirm({ open: true, id: p.row.id })}>
+            <IconButton size="small" color="error" aria-label="Delete transaction"
+              onClick={() => setConfirm({ open: true, row: p.row })}>
               <DeleteIcon fontSize="small" />
             </IconButton>
           </Tooltip>
@@ -348,6 +379,15 @@ export default function BankTransactions() {
   ];
 
   const selectedAccount = selected === ALL ? null : accountsById.get(selected);
+
+  /* Name the two accounts a transfer delete will touch, source first. */
+  const confirmRow = confirm.row;
+  const confirmIsTransfer = Boolean(confirmRow) && isTransfer(String(confirmRow.transactionType).toUpperCase());
+  const [confirmFrom, confirmTo] = !confirmIsTransfer ? [] : (
+    directionOf(confirmRow) === "debit"
+      ? [accountLabel(accountOf(confirmRow)), accountLabel(relatedOf(confirmRow))]
+      : [accountLabel(relatedOf(confirmRow)), accountLabel(accountOf(confirmRow))]
+  );
 
   return (
     <Box className="page-enter">
@@ -427,6 +467,9 @@ export default function BankTransactions() {
         >
           {txError}
         </Alert>
+      )}
+      {txNotice && (
+        <Alert severity="warning" sx={{ mb: 2 }} onClose={() => setTxNotice("")}>{txNotice}</Alert>
       )}
 
       <Paper variant="outlined" sx={{ overflow: "hidden" }}>
@@ -557,8 +600,11 @@ export default function BankTransactions() {
                 fullWidth
                 value={formData.transactionType}
                 onChange={handleChange}
+                helperText={isEditing ? "Transfers are added as new entries, not by editing." : undefined}
               >
-                {TRANSACTION_TYPES.map((t) => <MenuItem key={t.value} value={t.value}>{t.label}</MenuItem>)}
+                {TRANSACTION_TYPES
+                  .filter((t) => !isEditing || !isTransfer(t.value))
+                  .map((t) => <MenuItem key={t.value} value={t.value}>{t.label}</MenuItem>)}
               </TextField>
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
@@ -642,9 +688,11 @@ export default function BankTransactions() {
 
       <ConfirmDialog
         open={confirm.open}
-        title="Delete transaction?"
-        message="This permanently removes the transaction and changes the account's balance. This cannot be undone."
-        confirmLabel="Delete Transaction"
+        title={confirmIsTransfer ? "Delete transfer?" : "Delete transaction?"}
+        message={confirmIsTransfer
+          ? `This removes both sides of the transfer (${confirmFrom || "source"} → ${confirmTo || "destination"}) and changes both balances. This cannot be undone.`
+          : "This permanently removes the transaction and changes the account's balance. This cannot be undone."}
+        confirmLabel={confirmIsTransfer ? "Delete Transfer" : "Delete Transaction"}
         onConfirm={handleDeleteConfirmed}
         onClose={() => setConfirm((s) => ({ ...s, open: false }))}
       />

@@ -59,12 +59,15 @@ export function withRunningBalance(rows) {
  */
 function toApiTransaction(t) {
   const type = String(t.transactionType || "").toUpperCase();
+  // A transfer is two rows the server books together; saving one side alone
+  // would leave the other account's balance wrong.
+  if (isTransfer(type)) {
+    throw new Error("Transfers between accounts must be saved with createTransfer.");
+  }
   return {
     ...(t.id != null ? { id: Number(t.id) } : {}),
     accountId: Number(t.accountId),
-    relatedAccountId: isTransfer(type) && t.relatedAccountId !== "" && t.relatedAccountId != null
-      ? Number(t.relatedAccountId)
-      : null,
+    relatedAccountId: null,
     transactionDate: toApiDate(t.transactionDate),
     transactionType: type,
     amount: toApiNumber(t.amount),
@@ -85,6 +88,32 @@ function toApiTransfer(t) {
     referenceNo: toApiText(t.referenceNo),
     remarks: toApiText(t.remarks),
   };
+}
+
+const OPPOSITE = { TRANSFER_OUT: "TRANSFER_IN", TRANSFER_IN: "TRANSFER_OUT" };
+
+/**
+ * The other side of a transfer row, from `candidates` (the related account's
+ * transactions): the row that points back at this account with the opposite
+ * type, same amount, date and reference. Identical twins are interchangeable
+ * for balances; the closest id wins, since both sides are created together.
+ */
+export function findTransferPair(row, candidates) {
+  const type = String(row?.transactionType || "").toUpperCase();
+  const want = OPPOSITE[type];
+  if (!want) return null;
+  const sameDay = (a, b) => Date.parse(a) === Date.parse(b);
+  const matches = candidates.filter((c) =>
+    c.id !== row.id &&
+    c.accountId === row.relatedAccountId &&
+    c.relatedAccountId === row.accountId &&
+    String(c.transactionType || "").toUpperCase() === want &&
+    Math.abs((Number(c.amount) || 0) - (Number(row.amount) || 0)) < 0.005 &&
+    sameDay(c.transactionDate, row.transactionDate) &&
+    (c.referenceNo || "") === (row.referenceNo || "")
+  );
+  matches.sort((a, b) => Math.abs(a.id - row.id) - Math.abs(b.id - row.id));
+  return matches[0] || null;
 }
 
 class BankTransactionService {
@@ -128,6 +157,34 @@ class BankTransactionService {
 
   async deleteTransaction(id) {
     return unwrap(await apiClient.delete(`/BankTransaction/${id}`));
+  }
+
+  /**
+   * Delete a whole transfer. The API has no transfer delete endpoint, so the
+   * other side is located and deleted by id as well.
+   *
+   * The pair is found before anything is deleted: looking afterwards could
+   * match a different, identical transfer if the server had already removed
+   * the real one. A 404 on the second delete means it did exactly that.
+   *
+   * @returns {{ pair: object|null }} the other side that was removed, or null if none was found
+   */
+  async deleteTransfer(row) {
+    const candidates = row.relatedAccountId == null ? [] : await this.getByAccount(row.relatedAccountId);
+    const pair = findTransferPair(row, candidates);
+
+    await this.deleteTransaction(row.id);
+    if (!pair) return { pair: null };
+
+    try {
+      await this.deleteTransaction(pair.id);
+    } catch (e) {
+      if (e?.status !== 404) {
+        e.partial = true; // this side is gone; the other is still there
+        throw e;
+      }
+    }
+    return { pair };
   }
 }
 
