@@ -1,5 +1,5 @@
 import apiClient, { unwrap } from "./apiClient";
-import { fetchAllPages, toArray } from "./paginate";
+import { fetchAllPages, normaliseList, pageParams } from "./paginate";
 import { toApiText } from "./payload";
 
 /**
@@ -22,11 +22,20 @@ function toApiAccount(a) {
 }
 
 class BankAccountService {
-  /** Every account, across pages should the endpoint ever become paged. */
+  /** Every account, across all server pages (pick lists, account cards). */
   async getAccounts() {
     return fetchAllPages(
       async (params) => unwrap(await apiClient.get("/BankAccount", { params }))
     );
+  }
+
+  /**
+   * One page of accounts. Returns { data, total, ... }.
+   * @param {{ page?: number, pageSize?: number }} params  — 1-indexed page
+   */
+  async getAccountsPaginated({ page = 1, pageSize = 25 } = {}) {
+    const raw = unwrap(await apiClient.get("/BankAccount", { params: pageParams({ page, pageSize }) }));
+    return normaliseList(raw, page, pageSize);
   }
 
   async getAccount(id) {
@@ -52,7 +61,10 @@ class BankAccountService {
    * totalIn, totalOut, transferIn, transferOut, currentBalance }.
    */
   async getBalanceSummaries() {
-    return toArray(unwrap(await apiClient.get("/BankAccount/summary/accounts")));
+    // Paged like the account list; reading only page one would drop balances.
+    return fetchAllPages(
+      async (params) => unwrap(await apiClient.get("/BankAccount/summary/accounts", { params }))
+    );
   }
 
   /** Combined current balance of all accounts. */

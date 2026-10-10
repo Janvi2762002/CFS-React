@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Box, Button, TextField, Typography, IconButton, MenuItem, Stack, Paper,
@@ -15,17 +15,19 @@ import DeleteIcon from "@mui/icons-material/DeleteOutline";
 import BankAccountSlider, { maskAccountNo } from "../components/BankAccountSlider";
 import ConfirmDialog from "../components/ConfirmDialog";
 import BankAccountService from "../services/BankAccountService";
+import AmountField from "../components/AmountField";
 import BankTransactionService, {
-  TRANSACTION_TYPES, directionOf, isTransfer, withRunningBalance,
+  TRANSACTION_TYPES, ENTRY_TYPES, directionOf, isTransfer,
 } from "../services/BankTransactionService";
+import usePagedList from "../common/usePagedList";
 import { toLocalDateTime } from "../services/payload";
 import { paginationDisplayedRows } from "../components/gridPagination";
 import { formatGridDate } from "../components/gridDate";
 
 const ALL = "all";
 
-/* Every transaction is held client-side (the API does not page them), so
-   the grid can order the full list newest first. */
+/* Sorting is in the browser, so while paging on the server this orders the
+   page on screen; during a search it orders every match. */
 const NEWEST_FIRST = { sorting: { sortModel: [{ field: "transactionDate", sort: "desc" }] } };
 
 const TYPE_META = {
@@ -36,6 +38,12 @@ const TYPE_META = {
   TRANSFER_OUT: { color: "warning" },
 };
 const TYPE_LABEL = Object.fromEntries(TRANSACTION_TYPES.map((t) => [t.value, t.label]));
+
+/* The filter offers the same three choices as the form. An opening balance
+   is money coming into the account, so it lists under "Money in". */
+const matchesTypeFilter = (type, filter) =>
+  filter === ALL ||
+  (filter === "TRANSFER" ? isTransfer(type) : filter === "IN" ? type === "IN" || type === "OPENING" : type === filter);
 
 const inr = (n) =>
   `₹${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
@@ -73,15 +81,11 @@ export default function BankTransactions() {
 
   /* ── Transactions ───────────────────────────────────────────────────── */
   const [selected,         setSelected]         = useState(ALL);
-  const [transactions,     setTransactions]     = useState([]);
-  const [txLoading,        setTxLoading]        = useState(true);
-  const [txError,          setTxError]          = useState("");
   const [txNotice,         setTxNotice]         = useState("");
+  const [deleteError,      setDeleteError]      = useState("");
   const [search,           setSearch]           = useState("");
   const [typeFilter,       setTypeFilter]       = useState(ALL);
-  const [paginationModel,  setPaginationModel]  = useState({ page: 0, pageSize: 25 });
   const [columnVisibility, setColumnVisibility] = useState({});
-  const txRequest = useRef(0);
 
   /* ── Add / edit dialog ──────────────────────────────────────────────── */
   const [open,      setOpen]      = useState(false);
@@ -126,37 +130,30 @@ export default function BankTransactions() {
     setAccountsLoading(false);
   }, []);
 
-  const loadTransactions = useCallback(async () => {
-    // Switching accounts quickly must not let a slower, older reply win.
-    const request = ++txRequest.current;
-    setTxLoading(true);
-    setTxError("");
-    try {
-      const rows = selected === ALL
-        ? await BankTransactionService.getTransactions()
-        : await BankTransactionService.getByAccount(selected);
-      if (request !== txRequest.current) return;
-      const withBalance = withRunningBalance(rows);
-      /* An account's own rows are its full history; any row of another
-         account here is a fragment, so its running balance would be wrong. */
-      setTransactions(selected === ALL
-        ? withBalance
-        : withBalance.map((r) => (r.accountId === selected ? r : { ...r, balance: null })));
-    } catch (e) {
-      if (request !== txRequest.current) return;
-      setTransactions([]);
-      setTxError(e?.message || "Could not load transactions.");
-    } finally {
-      if (request === txRequest.current) setTxLoading(false);
-    }
-  }, [selected]);
+  /* One page per request, of every account or of the selected one. A search
+     or type filter needs every row, so then the full list is paged locally.
+     There is no running balance column: a page lacks the history it needs,
+     and each account's current balance is on its card above. */
+  const accountId = selected === ALL ? undefined : selected;
+  const fetchTxPage = useCallback(
+    (p) => BankTransactionService.getTransactionsPaginated({ ...p, accountId }),
+    [accountId]
+  );
+  const fetchAllTx = useCallback(
+    () => (accountId == null
+      ? BankTransactionService.getTransactions()
+      : BankTransactionService.getByAccount(accountId)),
+    [accountId]
+  );
+  const filtering = search.trim() !== "" || typeFilter !== ALL;
+  const list = usePagedList({ fetchPage: fetchTxPage, fetchAll: fetchAllTx, filtering });
+  const loadTransactions = list.reload;
 
   useEffect(() => { loadAccounts(); }, [loadAccounts]);
-  useEffect(() => { loadTransactions(); }, [loadTransactions]);
 
   const selectAccount = (id) => {
     setSelected(id);
-    setPaginationModel((m) => (m.page === 0 ? m : { ...m, page: 0 }));
+    list.setPaginationModel((m) => (m.page === 0 ? m : { ...m, page: 0 }));
   };
 
   /* Clicking the selected card again goes back to every account. */
@@ -229,11 +226,10 @@ export default function BankTransactions() {
       if (isEditing) {
         await BankTransactionService.updateTransaction(formData.id, formData);
       } else if (isTransfer(formData.transactionType)) {
-        const fromAccountId = formData.transactionType === "TRANSFER_IN" ? formData.relatedAccountId : formData.accountId;
-        const toAccountId = formData.transactionType === "TRANSFER_IN" ? formData.accountId : formData.relatedAccountId;
+        // On a transfer the form's account is the source and the related one the destination.
         await BankTransactionService.createTransfer({
-          fromAccountId,
-          toAccountId,
+          fromAccountId: formData.accountId,
+          toAccountId: formData.relatedAccountId,
           transactionDate: formData.transactionDate,
           amount: formData.amount,
           referenceNo: formData.referenceNo,
@@ -244,7 +240,8 @@ export default function BankTransactions() {
       }
       setOpen(false);
       // Balances move with every transaction, so the cards refresh too.
-      await Promise.all([loadAccounts({ quiet: true }), loadTransactions()]);
+      loadTransactions();
+      await loadAccounts({ quiet: true });
     } catch (e) {
       // Shown inside the dialog: a page-level alert would sit behind it.
       setFormError(e?.message || (isEditing ? "Could not update the transaction." : "Could not add the transaction."));
@@ -256,7 +253,7 @@ export default function BankTransactions() {
   const handleDeleteConfirmed = async () => {
     const { row } = confirm;
     if (!row) return;
-    setTxError("");
+    setDeleteError("");
     setTxNotice("");
     try {
       if (isTransfer(String(row.transactionType).toUpperCase())) {
@@ -272,26 +269,26 @@ export default function BankTransactions() {
         await BankTransactionService.deleteTransaction(row.id);
       }
     } catch (e) {
-      setTxError(e?.partial
+      setDeleteError(e?.partial
         ? `This side of the transfer was deleted, but the matching entry on ${accountLabel(relatedOf(row)) || "the other account"} could not be: ${e.message}`
         : e?.message || "Could not delete the transaction.");
     }
     // Reload even after a partial failure, so the grid shows what is really left.
-    await Promise.all([loadAccounts({ quiet: true }), loadTransactions()]);
+    loadTransactions();
+    await loadAccounts({ quiet: true });
   };
 
   /* ── Grid ───────────────────────────────────────────────────────────── */
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return transactions.filter((r) => {
-      const matchesType = typeFilter === ALL || String(r.transactionType).toUpperCase() === typeFilter;
-      if (!matchesType) return false;
+    return list.rows.filter((r) => {
+      if (!matchesTypeFilter(String(r.transactionType).toUpperCase(), typeFilter)) return false;
       if (!q) return true;
       return [r.remarks, r.referenceNo, accountLabel(accountOf(r)), accountLabel(relatedOf(r))]
         .some((v) => String(v || "").toLowerCase().includes(q));
     });
-  }, [transactions, search, typeFilter, accountOf, relatedOf]);
+  }, [list.rows, search, typeFilter, accountOf, relatedOf]);
 
   const columns = [
     { field: "transactionDate", headerName: "Date", width: 108, valueFormatter: (v) => formatGridDate(v) },
@@ -340,11 +337,6 @@ export default function BankTransactions() {
       field: "credit", headerName: "Credit", type: "number", width: 105,
       valueGetter: (v, row) => (directionOf(row) === "credit" ? Number(row.amount) || 0 : null),
       renderCell: (p) => <Money value={p.value} tone="success.main" />,
-    },
-    {
-      field: "balance", headerName: "Balance", type: "number", width: 115,
-      description: "Running balance of the account after this transaction",
-      renderCell: (p) => <Money value={p.value} tone={p.value < 0 ? "error.main" : "text.primary"} />,
     },
     {
       field: "actions", headerName: "Actions", width: 80, sortable: false, filterable: false,
@@ -424,7 +416,7 @@ export default function BankTransactions() {
             variant="outlined"
             startIcon={<RefreshIcon />}
             onClick={handleRefresh}
-            disabled={accountsLoading || txLoading}
+            disabled={accountsLoading || list.loading}
             sx={{ whiteSpace: "nowrap" }}
           >
             Refresh
@@ -459,14 +451,17 @@ export default function BankTransactions() {
       )}
 
       {/* ── Transactions ────────────────────────────────────────────────── */}
-      {txError && (
+      {list.error && (
         <Alert
           severity="error"
           sx={{ mb: 2 }}
           action={<Button color="inherit" size="small" onClick={loadTransactions}>Retry</Button>}
         >
-          {txError}
+          {list.error}
         </Alert>
+      )}
+      {deleteError && (
+        <Alert severity="error" sx={{ mb: 2 }} onClose={() => setDeleteError("")}>{deleteError}</Alert>
       )}
       {txNotice && (
         <Alert severity="warning" sx={{ mb: 2 }} onClose={() => setTxNotice("")}>{txNotice}</Alert>
@@ -533,7 +528,7 @@ export default function BankTransactions() {
             sx={{ minWidth: { md: 160 } }}
           >
             <MenuItem value={ALL}>All types</MenuItem>
-            {TRANSACTION_TYPES.map((t) => <MenuItem key={t.value} value={t.value}>{t.label}</MenuItem>)}
+            {ENTRY_TYPES.map((t) => <MenuItem key={t.value} value={t.value}>{t.label}</MenuItem>)}
           </TextField>
         </Stack>
 
@@ -545,20 +540,19 @@ export default function BankTransactions() {
           <DataGrid
             rows={filtered}
             columns={columns}
-            loading={txLoading}
+            loading={list.loading}
             initialState={NEWEST_FIRST}
             columnVisibilityModel={{ ...columnVisibility, accountId: selected === ALL }}
             onColumnVisibilityModelChange={setColumnVisibility}
-            paginationModel={paginationModel}
-            onPaginationModelChange={setPaginationModel}
+            {...list.gridProps}
             pageSizeOptions={[5, 10, 25, 50, 100]}
             getRowId={(r) => r.id}
             disableRowSelectionOnClick
             localeText={{
-              noRowsLabel: transactions.length
+              noRowsLabel: filtering
                 ? "No transactions match your filters."
                 : selectedAccount ? "No transactions for this account yet." : "No transactions recorded yet.",
-              paginationDisplayedRows: paginationDisplayedRows(paginationModel),
+              paginationDisplayedRows: paginationDisplayedRows(list.paginationModel),
             }}
             rowHeight={56}
           />
@@ -575,7 +569,7 @@ export default function BankTransactions() {
             <Grid size={12}>
               <TextField
                 select
-                label="Bank Account"
+                label={transfer ? "From Account" : "Bank Account"}
                 name="accountId"
                 required
                 fullWidth
@@ -602,9 +596,13 @@ export default function BankTransactions() {
                 onChange={handleChange}
                 helperText={isEditing ? "Transfers are added as new entries, not by editing." : undefined}
               >
-                {TRANSACTION_TYPES
+                {ENTRY_TYPES
                   .filter((t) => !isEditing || !isTransfer(t.value))
                   .map((t) => <MenuItem key={t.value} value={t.value}>{t.label}</MenuItem>)}
+                {/* An opening entry being edited keeps its own type rather than showing blank. */}
+                {isEditing && formData.transactionType === "OPENING" && (
+                  <MenuItem value="OPENING">{TYPE_LABEL.OPENING}</MenuItem>
+                )}
               </TextField>
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
@@ -623,16 +621,16 @@ export default function BankTransactions() {
               <Grid size={12}>
                 <TextField
                   select
-                  label={formData.transactionType === "TRANSFER_OUT" ? "To Account" : "From Account"}
+                  label="To Account"
                   name="relatedAccountId"
                   required
                   fullWidth
                   value={formData.relatedAccountId}
                   onChange={handleChange}
-                  helperText="The other account in this transfer"
+                  helperText="The account receiving the money"
                 >
                   {accounts.filter((a) => a.id !== formData.accountId).map((a) => (
-                    <MenuItem key={a.id} value={a.id}>
+                    <MenuItem key={a.id} value={a.id} disabled={!a.isActive}>
                       {accountLabel(a)}{a.accountNo ? ` (${maskAccountNo(a.accountNo)})` : ""}
                     </MenuItem>
                   ))}
@@ -640,16 +638,13 @@ export default function BankTransactions() {
               </Grid>
             )}
             <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField
+              <AmountField
                 label="Amount"
                 name="amount"
-                type="number"
                 required
                 fullWidth
                 value={formData.amount}
                 onChange={handleChange}
-                inputProps={{ min: 0.01, step: "0.01" }}
-                InputProps={{ startAdornment: <InputAdornment position="start">₹</InputAdornment> }}
               />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>

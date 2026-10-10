@@ -18,11 +18,12 @@ import StockItemService from "../services/StockItemService";
 import { paginationDisplayedRows } from "../components/gridPagination";
 import { formatGridDate } from "../components/gridDate";
 import { toLocalDateTime } from "../services/payload";
+import { DEFAULT_PAGE_SIZE } from "../services/paginate";
 
 export default function StockPayments() {
   const [payments,        setPayments]        = useState([]);
   const [rowCount,        setRowCount]        = useState(0);
-  const [paginationModel, setPaginationModel] = useState({ page: 0, pageSize: 25 });
+  const [paginationModel, setPaginationModel] = useState({ page: 0, pageSize: DEFAULT_PAGE_SIZE });
   const [stockItems,      setStockItems]      = useState([]);
   const [loading,         setLoading]         = useState(true);
   const [open,            setOpen]            = useState(false);

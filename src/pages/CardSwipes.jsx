@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback, useMemo } from "react";
+import React, { useState, useRef, useMemo } from "react";
 import { DataGrid } from "@mui/x-data-grid";
 import {
   Typography, Box, TextField, Button, IconButton,
@@ -15,13 +15,15 @@ import ClearIcon from "@mui/icons-material/Clear";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 import AdminService from "../services/AdminService";
+import usePagedList from "../common/usePagedList";
 import ConfirmDialog from "../components/ConfirmDialog";
 import { useAuth } from "../common/AuthContext";
 import { paginationDisplayedRows } from "../components/gridPagination";
 import { formatGridDate } from "../components/gridDate";
 import { toLocalDateTime } from "../services/payload";
 
-/* The whole register is loaded, so the grid can order it newest first. */
+/* Sorting is in the browser, so while paging on the server this orders the
+   page on screen; during a search it orders every match. */
 const NEWEST_FIRST = { sorting: { sortModel: [{ field: "date", sort: "desc" }] } };
 
 const STATUS_FILTERS = [
@@ -30,37 +32,31 @@ const STATUS_FILTERS = [
   { id: "pending", label: "Pending" },
 ];
 
+/* Stable references, so the paging hook does not refetch on every render. */
+const fetchSwipesPage = (p) => AdminService.getCardInfoPaginated(p);
+const fetchAllSwipes = () => AdminService.getCardInfo();
+
 export default function CardSwipes() {
   const { userRole } = useAuth();
   const canEdit = userRole === "master" || userRole === "admin";
 
-  const [rows,            setRows]            = useState([]);
-  const [paginationModel, setPaginationModel] = useState({ page: 0, pageSize: 25 });
   const [search,          setSearch]          = useState("");
   const [filterStatus,    setFilterStatus]    = useState("all");
-  const [loading,         setLoading]         = useState(true);
   const [open,            setOpen]            = useState(false);
   const [isEditing,       setIsEditing]       = useState(false);
   const [formData,        setFormData]        = useState({});
   const [saving,          setSaving]          = useState(false);
   const [error,           setError]           = useState("");
   const [confirm,         setConfirm]         = useState({ open: false, id: null });
+  const [exporting,       setExporting]       = useState(false);
   const fileInputRef = useRef();
   const isMobile = useMediaQuery("(max-width:768px)");
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const data = await AdminService.getCardInfo();
-      setRows(Array.isArray(data) ? data : []);
-    } catch (e) {
-      setRows([]);
-      setError(e?.message || "Could not load card swipes.");
-    } finally { setLoading(false); }
-  }, []);
-
-  useEffect(() => { fetchData(); }, [fetchData]);
+  /* The grid pages on the server; the API has no search parameters, so a
+     search or status filter loads the whole register and pages it locally. */
+  const filtering = search.trim() !== "" || filterStatus !== "all";
+  const list = usePagedList({ fetchPage: fetchSwipesPage, fetchAll: fetchAllSwipes, filtering });
+  const fetchData = list.reload;
 
   const handleOpen = (row = null) => {
     if (row) { setFormData(row); setIsEditing(true); }
@@ -82,7 +78,7 @@ export default function CardSwipes() {
     try {
       await AdminService.saveCard(formData);
       setOpen(false);
-      await fetchData();
+      fetchData();
     } catch (e) {
       setError(e?.message || "Could not create the swipe entry.");
     } finally { setSaving(false); }
@@ -93,7 +89,7 @@ export default function CardSwipes() {
     try {
       await AdminService.updateCard(formData.id, formData);
       setOpen(false);
-      await fetchData();
+      fetchData();
     } catch (e) {
       setError(e?.message || "Could not update the swipe entry.");
     } finally { setSaving(false); }
@@ -104,7 +100,7 @@ export default function CardSwipes() {
     setError("");
     try {
       await AdminService.deleteCard(id);
-      await fetchData();
+      fetchData();
     } catch (e) {
       setError(e?.message || "Could not delete the swipe entry.");
     }
@@ -119,7 +115,7 @@ export default function CardSwipes() {
   const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
   const filteredRows = useMemo(() => {
-    return rows.filter((r) => {
+    return list.rows.filter((r) => {
       const matchesSearch =
         (r.partyName || "").toLowerCase().includes(search.toLowerCase()) ||
         (r.cardNumber || "").toString().includes(search) ||
@@ -130,10 +126,20 @@ export default function CardSwipes() {
         filterStatus === "pending" ? !r.limitUsed : true;
       return matchesSearch && matchesFilter;
     });
-  }, [rows, search, filterStatus]);
+  }, [list.rows, search, filterStatus]);
 
-  const handleExport = () => {
-    const sheet = XLSX.utils.json_to_sheet(filteredRows);
+  /* The export covers every matching record, not just the page on screen. */
+  const handleExport = async () => {
+    setExporting(true);
+    setError("");
+    let all;
+    try {
+      all = filtering ? filteredRows : await AdminService.getCardInfo();
+    } catch (e) {
+      setError(e?.message || "Could not load card swipes for export.");
+      return;
+    } finally { setExporting(false); }
+    const sheet = XLSX.utils.json_to_sheet(all);
     const book  = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(book, sheet, "CardSwipes");
     saveAs(new Blob([XLSX.write(book, { bookType: "xlsx", type: "array" })]), "card_swipes.xlsx");
@@ -152,7 +158,7 @@ export default function CardSwipes() {
         try { await AdminService.saveCard(row); } catch { failed += 1; }
       }
       if (failed) setError(`${failed} of ${valid.length} imported rows could not be saved.`);
-      await fetchData();
+      fetchData();
     };
     e.target.value = "";
     reader.readAsArrayBuffer(file);
@@ -229,6 +235,12 @@ export default function CardSwipes() {
   return (
     <Box className="page-enter">
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
+      {list.error && (
+        <Alert severity="error" sx={{ mb: 2 }}
+          action={<Button color="inherit" size="small" onClick={list.reload}>Retry</Button>}>
+          {list.error}
+        </Alert>
+      )}
       <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between"
         alignItems={{ sm: "center" }} spacing={2} sx={{ mb: 3 }}>
         <Box>
@@ -263,7 +275,9 @@ export default function CardSwipes() {
           </TextField>
           <Box sx={{ flexGrow: 1 }} />
           <Stack direction="row" spacing={1}>
-            <Button variant="outlined" startIcon={<DownloadIcon />} onClick={handleExport}>Export</Button>
+            <Button variant="outlined" startIcon={<DownloadIcon />} onClick={handleExport} disabled={exporting}>
+              {exporting ? "Exporting…" : "Export"}
+            </Button>
             {canEdit && (
               <Button variant="outlined" startIcon={<UploadIcon />} onClick={() => fileInputRef.current?.click()}>Import</Button>
             )}
@@ -271,19 +285,20 @@ export default function CardSwipes() {
           </Stack>
         </Stack>
         <Divider />
-        <Box sx={{ height: 580 }}>
+        {/* A flex-column parent lets the grid grow with its rows, so the page
+            scrolls instead of the grid clipping rows inside a fixed box. */}
+        <Box sx={{ display: "flex", flexDirection: "column" }}>
           <DataGrid
             rows={filteredRows}
             columns={columns}
             initialState={NEWEST_FIRST}
-            loading={loading}
-            paginationModel={paginationModel}
-            onPaginationModelChange={setPaginationModel}
+            loading={list.loading}
+            {...list.gridProps}
             pageSizeOptions={[5, 10, 25, 50, 100]}
             disableRowSelectionOnClick
             localeText={{
               noRowsLabel: "No card swipes match your filters.",
-              paginationDisplayedRows: paginationDisplayedRows(paginationModel),
+              paginationDisplayedRows: paginationDisplayedRows(list.paginationModel),
             }}
             rowHeight={56}
           />

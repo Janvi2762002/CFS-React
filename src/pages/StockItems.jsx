@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import {
   Box, Button, Dialog, DialogActions, DialogContent, DialogTitle,
   TextField, Typography, IconButton, useMediaQuery, MenuItem,
@@ -14,15 +14,16 @@ import Inventory2Icon from "@mui/icons-material/Inventory2Outlined";
 import StatTile from "../components/StatTile";
 import ConfirmDialog from "../components/ConfirmDialog";
 import StockItemService from "../services/StockItemService";
+import usePagedList from "../common/usePagedList";
 import { paginationDisplayedRows } from "../components/gridPagination";
 import { formatGridDate } from "../components/gridDate";
 import { toLocalDateTime } from "../services/payload";
 
+/* Stable references, so the paging hook does not refetch on every render. */
+const fetchItemsPage = (p) => StockItemService.getItemsPaginated(p);
+const fetchAllItems = () => StockItemService.getItems();
+
 export default function StockItems() {
-  const [items,           setItems]           = useState([]);
-  const [rowCount,        setRowCount]        = useState(0);
-  const [paginationModel, setPaginationModel] = useState({ page: 0, pageSize: 25 });
-  const [loading,         setLoading]         = useState(true);
   const [open,            setOpen]            = useState(false);
   const [isEditing,       setIsEditing]       = useState(false);
   const [search,          setSearch]          = useState("");
@@ -34,24 +35,11 @@ export default function StockItems() {
   const [confirm,         setConfirm]         = useState({ open: false, id: null });
   const isMobile = useMediaQuery("(max-width:768px)");
 
-  const loadItems = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const { data, total } = await StockItemService.getItemsPaginated({
-        page: paginationModel.page + 1,
-        pageSize: paginationModel.pageSize,
-      });
-      setItems(data || []);
-      setRowCount(total);
-    } catch (e) {
-      setItems([]);
-      setRowCount(0);
-      setError(e?.message || "Could not load stock items.");
-    } finally { setLoading(false); }
-  }, [paginationModel]);
-
-  useEffect(() => { loadItems(); }, [loadItems]);
+  /* The grid pages on the server. Search and the status / IN-OUT filters
+     need every item, so while any is set the full list is paged locally. */
+  const filtering = search.trim() !== "" || statusFilter !== "all" || inOutFilter !== "all";
+  const list = usePagedList({ fetchPage: fetchItemsPage, fetchAll: fetchAllItems, filtering });
+  const loadItems = list.reload;
 
   const handleOpen = (item = null) => {
     if (item) {
@@ -93,7 +81,7 @@ export default function StockItems() {
     try {
       await StockItemService.saveItem(formData);
       setOpen(false);
-      await loadItems();
+      loadItems();
     } catch (e) {
       setError(e?.message || "Could not create the item.");
     } finally { setSaving(false); }
@@ -104,7 +92,7 @@ export default function StockItems() {
     try {
       await StockItemService.updateItem(formData.id, formData);
       setOpen(false);
-      await loadItems();
+      loadItems();
     } catch (e) {
       setError(e?.message || "Could not update the item.");
     } finally { setSaving(false); }
@@ -119,15 +107,15 @@ export default function StockItems() {
     setError("");
     try {
       await StockItemService.deleteItem(id);
-      await loadItems();
+      loadItems();
     } catch (e) {
       setError(e?.message || "Could not delete the item.");
     }
   };
 
-  /* Client-side search/filter on the current page results */
+  /* While searching or filtering, this covers every item, not one page. */
   const filtered = useMemo(() => {
-    return items.filter((i) => {
+    return list.rows.filter((i) => {
       const q = search.toLowerCase();
       const matchesSearch =
         (i.no || "").toLowerCase().includes(q) ||
@@ -138,7 +126,7 @@ export default function StockItems() {
       const matchesInOut = inOutFilter === "all" ? true : i.inOut === inOutFilter;
       return matchesSearch && matchesStatus && matchesInOut;
     });
-  }, [items, search, statusFilter, inOutFilter]);
+  }, [list.rows, search, statusFilter, inOutFilter]);
 
   const columns = [
     { field: "no",        headerName: "No.",        width: 100 },
@@ -175,6 +163,12 @@ export default function StockItems() {
   return (
     <Box className="page-enter">
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
+      {list.error && (
+        <Alert severity="error" sx={{ mb: 2 }}
+          action={<Button color="inherit" size="small" onClick={list.reload}>Retry</Button>}>
+          {list.error}
+        </Alert>
+      )}
 
       <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={2} sx={{ mb: 3 }}>
         <Box>
@@ -187,8 +181,8 @@ export default function StockItems() {
       </Stack>
 
       <Grid container spacing={2} className="stagger" sx={{ mb: 3 }}>
-        <Grid size={{ xs: 12, sm: 6 }}><StatTile label="Total Items (page)" value={filtered.length} icon={Inventory2Icon} color="primary" /></Grid>
-        <Grid size={{ xs: 12, sm: 6 }}><StatTile label="Page Total Amount" value={`₹${totalAmount.toLocaleString()}`} icon={Inventory2Icon} color="success" /></Grid>
+        <Grid size={{ xs: 12, sm: 6 }}><StatTile label={filtering ? "Matching Items" : "Total Items"} value={filtering ? filtered.length : list.rowCount} icon={Inventory2Icon} color="primary" /></Grid>
+        <Grid size={{ xs: 12, sm: 6 }}><StatTile label={filtering ? "Matching Total Amount" : "Page Total Amount"} value={`₹${totalAmount.toLocaleString()}`} icon={Inventory2Icon} color="success" /></Grid>
       </Grid>
 
       <Paper variant="outlined" sx={{ overflow: "hidden" }}>
@@ -220,21 +214,20 @@ export default function StockItems() {
 
         <Divider />
 
-        <Box sx={{ height: 560 }}>
+        {/* A flex-column parent lets the grid grow with its rows, so the page
+            scrolls instead of the grid clipping rows inside a fixed box. */}
+        <Box sx={{ display: "flex", flexDirection: "column" }}>
           <DataGrid
             rows={filtered}
             columns={columns}
-            rowCount={rowCount}
-            loading={loading}
-            paginationMode="server"
-            paginationModel={paginationModel}
-            onPaginationModelChange={setPaginationModel}
+            loading={list.loading}
+            {...list.gridProps}
             pageSizeOptions={[5, 10, 25, 50, 100]}
             getRowId={(r) => r.id}
             disableRowSelectionOnClick
             localeText={{
               noRowsLabel: "No stock items match your filters.",
-              paginationDisplayedRows: paginationDisplayedRows(paginationModel),
+              paginationDisplayedRows: paginationDisplayedRows(list.paginationModel),
             }}
             rowHeight={56}
           />

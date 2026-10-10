@@ -1,5 +1,5 @@
 import apiClient, { unwrap } from "./apiClient";
-import { fetchAllPages } from "./paginate";
+import { fetchAllPages, normaliseList, pageParams } from "./paginate";
 import { toApiDate, toApiNumber, toApiText } from "./payload";
 
 /**
@@ -16,43 +16,25 @@ export const TRANSACTION_TYPES = [
   { value: "TRANSFER_OUT", label: "Transfer out", direction: "debit"  },
 ];
 
+/**
+ * The only choices offered when adding an entry. A transfer is one entry
+ * here and the server books it as a TRANSFER_OUT / TRANSFER_IN pair;
+ * OPENING rows come only from creating an account.
+ */
+export const ENTRY_TYPES = [
+  { value: "IN",       label: "Money in" },
+  { value: "OUT",      label: "Money out" },
+  { value: "TRANSFER", label: "Transfer" },
+];
+
 const DIRECTION = Object.fromEntries(TRANSACTION_TYPES.map((t) => [t.value, t.direction]));
 
-export const isTransfer = (type) => type === "TRANSFER_IN" || type === "TRANSFER_OUT";
+export const isTransfer = (type) =>
+  type === "TRANSFER" || type === "TRANSFER_IN" || type === "TRANSFER_OUT";
 
 /** "credit", "debit", or null for a type the API does not define. */
 export const directionOf = (row) =>
   DIRECTION[String(row?.transactionType || "").toUpperCase()] ?? null;
-
-/**
- * Attach each row's running account balance as `balance`.
- */
-export function withRunningBalance(rows) {
-  const byAccount = new Map();
-  rows.forEach((r) => {
-    const list = byAccount.get(r.accountId) || [];
-    list.push(r);
-    byAccount.set(r.accountId, list);
-  });
-
-  const balanceById = new Map();
-  byAccount.forEach((list) => {
-    list.sort((a, b) =>
-      (Date.parse(a.transactionDate) || 0) - (Date.parse(b.transactionDate) || 0) ||
-      (Number(a.id) || 0) - (Number(b.id) || 0)
-    );
-    let running = 0;
-    list.forEach((r) => {
-      const amount = Number(r.amount) || 0;
-      const dir = directionOf(r);
-      if (dir === "credit") running += amount;
-      if (dir === "debit") running -= amount;
-      balanceById.set(r.id, running);
-    });
-  });
-
-  return rows.map((r) => ({ ...r, balance: balanceById.get(r.id) ?? null }));
-}
 
 /**
  * Shape a transaction to the BankTransaction contract for single account movements.
@@ -129,6 +111,17 @@ class BankTransactionService {
     return fetchAllPages(
       async (p) => unwrap(await apiClient.get(`/BankTransaction/account/${accountId}`, { params: { ...p, ...params } }))
     );
+  }
+
+  /**
+   * One page of transactions, across all accounts or for one account.
+   * Returns { data, total, ... }.
+   * @param {{ page?: number, pageSize?: number, accountId?: number }} params  — 1-indexed page
+   */
+  async getTransactionsPaginated({ page = 1, pageSize = 25, accountId } = {}) {
+    const url = accountId == null ? "/BankTransaction" : `/BankTransaction/account/${accountId}`;
+    const raw = unwrap(await apiClient.get(url, { params: pageParams({ page, pageSize }) }));
+    return normaliseList(raw, page, pageSize);
   }
 
   async getTransaction(id) {

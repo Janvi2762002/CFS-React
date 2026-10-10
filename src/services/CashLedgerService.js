@@ -1,5 +1,5 @@
 import apiClient, { unwrap } from "./apiClient";
-import { normaliseList } from "./paginate";
+import { toArray } from "./paginate";
 import { toApiDate, toApiNumber, toApiText } from "./payload";
 
 /* Newest first; entries on the same day fall back to the later id first. */
@@ -28,20 +28,15 @@ class CashLedgerService {
   }
 
   /**
-   * Fetch a page of cash ledger entries.
+   * Every entry, newest first.
    *
    * Unlike the other list endpoints, /CashLedger accepts no paging
-   * parameters and returns the full collection, so the window is applied
-   * client-side. `total` is therefore the true total either way.
-   *
-   * @param {{ page?: number, pageSize?: number }} params  — 1-indexed page
-   * @returns {{ data: [], total: number, page, totalPages, next, previous }}
+   * parameters and returns the full collection, so callers page it locally
+   * rather than asking again for each page.
    */
-  async getEntriesPaginated({ page = 1, pageSize = 25 } = {}) {
+  async getEntriesNewestFirst() {
     const raw = unwrap(await apiClient.get("/CashLedger"));
-    // The window is cut locally, so order the full list before slicing it.
-    const ordered = Array.isArray(raw) ? [...raw].sort(byNewest) : raw;
-    return normaliseList(ordered, page, pageSize);
+    return Array.isArray(raw) ? [...raw].sort(byNewest) : toArray(raw);
   }
 
   async getEntry(id) {

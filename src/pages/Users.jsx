@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import {
   Box, Button, Dialog, DialogActions, DialogContent, DialogTitle,
   TextField, Typography, IconButton, useMediaQuery, MenuItem,
@@ -16,7 +16,9 @@ import AdminPanelSettingsIcon from "@mui/icons-material/AdminPanelSettingsOutlin
 import PersonIcon from "@mui/icons-material/PersonOutlined";
 import StatTile from "../components/StatTile";
 import ConfirmDialog from "../components/ConfirmDialog";
+import { PASSWORD_MIN, PASSWORD_MAX, isValidPassword, isValidPhone } from "../common/userValidation";
 import AdminService from "../services/AdminService";
+import usePagedList from "../common/usePagedList";
 import { ROLE_OPTIONS } from "../services/AuthService";
 import { paginationDisplayedRows } from "../components/gridPagination";
 
@@ -35,10 +37,11 @@ function RoleChip({ role }) {
   );
 }
 
+/* Stable references, so the paging hook does not refetch on every render. */
+const fetchUsersPage = (p) => AdminService.getUsersPaginated(p);
+const fetchAllUsers = () => AdminService.getUsers();
+
 export default function Users() {
-  const [users,           setUsers]           = useState([]);
-  const [paginationModel, setPaginationModel] = useState({ page: 0, pageSize: 25 });
-  const [loading,         setLoading]         = useState(true);
   const [open,       setOpen]       = useState(false);
   const [isEditing,  setIsEditing]  = useState(false);
   const [search,     setSearch]     = useState("");
@@ -52,18 +55,13 @@ export default function Users() {
   const [confirm, setConfirm] = useState({ open: false, id: null });
   const isMobile = useMediaQuery("(max-width:768px)");
 
-  useEffect(() => { loadUsers(); }, []);
-
-  const loadUsers = async () => {
-    setLoading(true);
-    setError("");
-    try {
-      setUsers(await AdminService.getUsers());
-    } catch (e) {
-      setUsers([]);
-      setError(e?.message || "Could not load users.");
-    } finally { setLoading(false); }
-  };
+  /* The grid pages on the server; a search or role filter needs every user. */
+  const filtering = search.trim() !== "" || roleFilter !== "all";
+  const list = usePagedList({
+    fetchPage: fetchUsersPage,
+    fetchAll: fetchAllUsers,
+    filtering,
+  });
 
   const handleOpen = (user = null) => {
     if (user) {
@@ -87,16 +85,30 @@ export default function Users() {
 
   const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
+  /* Mirrors the API's rules (username 3+ characters, password 8–128,
+     a valid phone) so the form says what is wrong instead of a 400. */
+  const usernameValid = (formData.username?.trim().length || 0) >= 3;
+  const passwordEntered = Boolean(formData.password);
+  const passwordValid = isEditing && !passwordEntered ? true : isValidPassword(formData.password);
+  const phoneValid = isValidPhone(formData.phoneNumber);
+
   const canSubmit =
-    formData.username?.trim() && formData.fullName?.trim() && formData.role &&
-    (isEditing || formData.password);
+    usernameValid && formData.fullName?.trim() && formData.role && passwordValid && phoneValid;
+
+  const passwordHelp =
+    isEditing && !passwordEntered ? "Leave blank to keep the current password" :
+    passwordEntered && !passwordValid
+      ? (formData.password.length < PASSWORD_MIN
+        ? `At least ${PASSWORD_MIN} characters (${PASSWORD_MIN - formData.password.length} more)`
+        : `At most ${PASSWORD_MAX} characters`)
+      : `${PASSWORD_MIN}–${PASSWORD_MAX} characters`;
 
   const handleSave = async () => {
     setSaving(true); setError("");
     try {
       await AdminService.saveUser(formData);
       setOpen(false);
-      await loadUsers();
+      list.reload();
     } catch (e) {
       setError(e?.message || "Could not create the user.");
     } finally { setSaving(false); }
@@ -107,7 +119,7 @@ export default function Users() {
     try {
       await AdminService.updateUser(formData.id, formData);
       setOpen(false);
-      await loadUsers();
+      list.reload();
     } catch (e) {
       setError(e?.message || "Could not update the user.");
     } finally { setSaving(false); }
@@ -118,14 +130,14 @@ export default function Users() {
     setError("");
     try {
       await AdminService.deleteUser(id);
-      setUsers((u) => u.filter((x) => x.id !== id));
+      list.reload();
     } catch (e) {
       setError(e?.message || "Could not delete the user.");
     }
   };
 
   const filtered = useMemo(() =>
-    users.filter((u) => {
+    list.rows.filter((u) => {
       const q = search.toLowerCase();
       const matchesSearch =
         (u.fullName || "").toLowerCase().includes(q) ||
@@ -133,7 +145,7 @@ export default function Users() {
         (u.role || "").toLowerCase().includes(q);
       const matchesRole = roleFilter === "all" ? true : u.role === roleFilter;
       return matchesSearch && matchesRole;
-    }), [users, search, roleFilter]);
+    }), [list.rows, search, roleFilter]);
 
   const columns = [
     {
@@ -169,12 +181,21 @@ export default function Users() {
     },
   ];
 
-  const admins    = users.filter((u) => u.role === "admin").length;
-  const employees = users.filter((u) => u.role === "employee").length;
+  /* No extra request for the tiles: the total is the count the paged reply
+     already carries, and the API reports no per-role counts, so those show 0. */
+  const totalUsers = list.rowCount || 0;
+  const admins     = 0;
+  const employees  = 0;
 
   return (
     <Box className="page-enter">
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
+      {list.error && (
+        <Alert severity="error" sx={{ mb: 2 }}
+          action={<Button color="inherit" size="small" onClick={list.reload}>Retry</Button>}>
+          {list.error}
+        </Alert>
+      )}
 
       {/* ── Page Header ─────────────────────────────────────────────── */}
       <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between"
@@ -192,7 +213,7 @@ export default function Users() {
 
       {/* ── Summary Tiles ───────────────────────────────────────────── */}
       <Grid container spacing={2} className="stagger" sx={{ mb: 3 }}>
-        <Grid size={{ xs: 12, sm: 6, lg: 4 }}><StatTile label="Total Users" value={users.length} icon={BadgeIcon} color="primary" /></Grid>
+        <Grid size={{ xs: 12, sm: 6, lg: 4 }}><StatTile label="Total Users" value={totalUsers} icon={BadgeIcon} color="primary" /></Grid>
         <Grid size={{ xs: 12, sm: 6, lg: 4 }}><StatTile label="Admins"      value={admins}      icon={AdminPanelSettingsIcon} color="success" /></Grid>
         <Grid size={{ xs: 12, sm: 6, lg: 4 }}><StatTile label="Employees"   value={employees}   icon={PersonIcon} color="info" /></Grid>
       </Grid>
@@ -225,19 +246,20 @@ export default function Users() {
 
         <Divider />
 
-        <Box sx={{ height: 560 }}>
+        {/* A flex-column parent lets the grid grow with its rows, so the page
+            scrolls instead of the grid clipping rows inside a fixed box. */}
+        <Box sx={{ display: "flex", flexDirection: "column" }}>
           <DataGrid
             rows={filtered}
             columns={columns}
             getRowId={(r) => r.id}
-            loading={loading}
+            loading={list.loading}
             disableRowSelectionOnClick
-            paginationModel={paginationModel}
-            onPaginationModelChange={setPaginationModel}
+            {...list.gridProps}
             pageSizeOptions={[5, 10, 25, 50, 100]}
             localeText={{
               noRowsLabel: "No users match the search criteria.",
-              paginationDisplayedRows: paginationDisplayedRows(paginationModel),
+              paginationDisplayedRows: paginationDisplayedRows(list.paginationModel),
             }}
             rowHeight={56}
           />
@@ -252,25 +274,34 @@ export default function Users() {
           <Grid container spacing={2} sx={{ mt: 0 }}>
             <Grid size={{ xs: 12, sm: 6 }}>
               <TextField label="Username" name="username" required fullWidth
-                value={formData.username} onChange={handleChange} />
+                value={formData.username} onChange={handleChange}
+                inputProps={{ maxLength: 100 }}
+                error={formData.username !== "" && !usernameValid}
+                helperText={formData.username !== "" && !usernameValid ? "At least 3 characters" : ""} />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
               <TextField label="Password" name="password" type="password" fullWidth
                 required={!isEditing} autoComplete="new-password"
                 value={formData.password} onChange={handleChange}
-                helperText={isEditing ? "Leave blank to keep the current password" : ""} />
+                inputProps={{ maxLength: PASSWORD_MAX }}
+                error={passwordEntered && !passwordValid}
+                helperText={passwordHelp} />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
               <TextField label="Full Name" name="fullName" required fullWidth
-                value={formData.fullName} onChange={handleChange} />
+                value={formData.fullName} onChange={handleChange} inputProps={{ maxLength: 150 }} />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
               <TextField label="Nick Name / Alias" name="nickName" fullWidth
-                value={formData.nickName} onChange={handleChange} />
+                value={formData.nickName} onChange={handleChange} inputProps={{ maxLength: 100 }} />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField label="Contact Phone" name="phoneNumber" fullWidth
-                value={formData.phoneNumber} onChange={handleChange} />
+              <TextField label="Contact Phone" name="phoneNumber" type="tel" fullWidth
+                value={formData.phoneNumber} onChange={handleChange}
+                inputProps={{ maxLength: 30, inputMode: "tel" }}
+                placeholder="+91 98765 43210"
+                error={!phoneValid}
+                helperText={!phoneValid ? "Use digits, spaces, + - ( ) only" : ""} />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
               <TextField select label="Role" name="role" required fullWidth
@@ -282,7 +313,7 @@ export default function Users() {
             </Grid>
             <Grid size={12}>
               <TextField label="Additional Info" name="additionalInfo" fullWidth multiline minRows={2}
-                value={formData.additionalInfo} onChange={handleChange} />
+                value={formData.additionalInfo} onChange={handleChange} inputProps={{ maxLength: 1000 }} />
             </Grid>
           </Grid>
         </DialogContent>

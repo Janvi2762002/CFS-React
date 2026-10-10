@@ -68,6 +68,16 @@ class AdminService {
     return rows.map(toAppUser);
   }
 
+  /**
+   * One page of users. Returns { data, total, ... }.
+   * @param {{ page?: number, pageSize?: number }} params  — 1-indexed page
+   */
+  async getUsersPaginated({ page = 1, pageSize = 25 } = {}) {
+    const raw = unwrap(await apiClient.get("/Users", { params: pageParams({ page, pageSize }) }));
+    const list = normaliseList(raw, page, pageSize);
+    return { ...list, data: list.data.map(toAppUser) };
+  }
+
   async getUserById(userId) {
     return toAppUser(unwrap(await apiClient.get(`/Users/${userId}`)));
   }

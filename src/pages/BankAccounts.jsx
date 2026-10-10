@@ -23,6 +23,7 @@ import BankTransactionService from "../services/BankTransactionService";
 import { toLocalDateTime } from "../services/payload";
 import { paginationDisplayedRows } from "../components/gridPagination";
 import { formatGridDate } from "../components/gridDate";
+import usePagedList from "../common/usePagedList";
 
 const inr = (n) =>
   `₹${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
@@ -37,15 +38,18 @@ const emptyForm = () => ({
 /* Spaces and case are ignored when comparing account numbers. */
 const normalNo = (v) => String(v || "").replace(/\s+/g, "").toLowerCase();
 
+/* Stable references, so the paging hook does not refetch on every render. */
+const fetchAccountsPage = (p) => BankAccountService.getAccountsPaginated(p);
+const fetchAllAccounts = () => BankAccountService.getAccounts();
+
 export default function BankAccounts() {
   const theme = useTheme();
-  const [accounts,        setAccounts]        = useState([]);
-  const [loading,         setLoading]         = useState(true);
+  const [balances,        setBalances]        = useState(new Map());
+  const [knownAccounts,   setKnownAccounts]   = useState([]);
   const [error,           setError]           = useState("");
   const [notice,          setNotice]          = useState("");
   const [search,          setSearch]          = useState("");
   const [statusFilter,    setStatusFilter]    = useState("all");
-  const [paginationModel, setPaginationModel] = useState({ page: 0, pageSize: 25 });
   const [open,            setOpen]            = useState(false);
   const [isEditing,       setIsEditing]       = useState(false);
   const [formData,        setFormData]        = useState(emptyForm());
@@ -54,29 +58,32 @@ export default function BankAccounts() {
   const [confirm,         setConfirm]         = useState({ open: false, account: null });
   const isMobile = useMediaQuery("(max-width:768px)");
 
-  const loadAccounts = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    /* Balances are a nice-to-have here; if the summary call fails the
-       column just shows a dash rather than blocking account upkeep. */
-    const [list, summaries] = await Promise.allSettled([
-      BankAccountService.getAccounts(),
-      BankAccountService.getBalanceSummaries(),
-    ]);
-    if (list.status === "rejected") {
-      setAccounts([]);
-      setError(list.reason?.message || "Could not load bank accounts.");
-      setLoading(false);
-      return;
-    }
-    const byId = new Map(
-      (summaries.status === "fulfilled" ? summaries.value : []).map((s) => [s.accountId, s])
-    );
-    setAccounts(list.value.map((a) => ({ ...a, currentBalance: byId.get(a.id)?.currentBalance ?? null })));
-    setLoading(false);
-  }, []);
+  /* The grid pages on the server; a search or status filter needs every
+     account, so then the full list is paged locally. */
+  const filtering = search.trim() !== "" || statusFilter !== "all";
+  const list = usePagedList({ fetchPage: fetchAccountsPage, fetchAll: fetchAllAccounts, filtering });
 
-  useEffect(() => { loadAccounts(); }, [loadAccounts]);
+  /* Balances come from their own (also paged) summary endpoint, so they load
+     once per refresh rather than on every page change. They are a
+     nice-to-have here; if the call fails the column just shows a dash. */
+  const [balancesVersion, setBalancesVersion] = useState(0);
+  useEffect(() => {
+    let live = true;
+    BankAccountService.getBalanceSummaries()
+      .then((rows) => { if (live) setBalances(new Map(rows.map((r) => [r.accountId, r.currentBalance]))); })
+      .catch(() => { if (live) setBalances(new Map()); });
+    return () => { live = false; };
+  }, [balancesVersion]);
+
+  const loadAccounts = useCallback(() => {
+    list.reload();
+    setBalancesVersion((v) => v + 1);
+  }, [list.reload]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const accounts = useMemo(
+    () => list.rows.map((a) => ({ ...a, currentBalance: balances.get(a.id) ?? null })),
+    [list.rows, balances]
+  );
 
   const handleOpen = (account = null) => {
     if (account) {
@@ -96,6 +103,8 @@ export default function BankAccounts() {
     }
     setFormError("");
     setOpen(true);
+    /* The duplicate-number check needs every account, not just this page. */
+    BankAccountService.getAccounts().then(setKnownAccounts).catch(() => setKnownAccounts([]));
   };
 
   const handleChange = (e) => setFormData((f) => ({ ...f, [e.target.name]: e.target.value }));
@@ -105,10 +114,10 @@ export default function BankAccounts() {
     const no = normalNo(formData.accountNo);
     if (!no) return null;
     const bank = formData.bankName.trim().toLowerCase();
-    return accounts.find((a) =>
+    return knownAccounts.find((a) =>
       a.id !== formData.id && normalNo(a.accountNo) === no && (a.bankName || "").trim().toLowerCase() === bank
     ) || null;
-  }, [accounts, formData.accountNo, formData.bankName, formData.id]);
+  }, [knownAccounts, formData.accountNo, formData.bankName, formData.id]);
 
   const opening = formData.openingBalance === "" ? 0 : Number(formData.openingBalance);
   const openingValid = Number.isFinite(opening) && opening >= 0 && (opening === 0 || Boolean(formData.openingDate));
@@ -148,7 +157,7 @@ export default function BankAccounts() {
         }
       }
       setOpen(false);
-      await loadAccounts();
+      loadAccounts();
     } catch (e) {
       // Shown inside the dialog: a page-level alert would sit behind it.
       setFormError(e?.message || (isEditing ? "Could not update the account." : "Could not add the account."));
@@ -163,7 +172,7 @@ export default function BankAccounts() {
     setNotice("");
     try {
       await BankAccountService.deleteAccount(id);
-      await loadAccounts();
+      loadAccounts();
     } catch (e) {
       setError(e?.message || "Could not delete the account. If it has transactions, mark it inactive instead.");
     }
@@ -180,7 +189,9 @@ export default function BankAccounts() {
     });
   }, [accounts, search, statusFilter]);
 
-  const activeCount = accounts.filter((a) => a.isActive).length;
+  /* No extra request for the tiles: the total is the count the paged reply
+     already carries, and the API reports no active / inactive counts. */
+  const totalAccounts = list.rowCount || 0;
 
   const columns = [
     {
@@ -245,6 +256,12 @@ export default function BankAccounts() {
   return (
     <Box className="page-enter">
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
+      {list.error && (
+        <Alert severity="error" sx={{ mb: 2 }}
+          action={<Button color="inherit" size="small" onClick={loadAccounts}>Retry</Button>}>
+          {list.error}
+        </Alert>
+      )}
       {notice && <Alert severity="warning" sx={{ mb: 2 }} onClose={() => setNotice("")}>{notice}</Alert>}
 
       <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between"
@@ -261,9 +278,9 @@ export default function BankAccounts() {
       </Stack>
 
       <Grid container spacing={2} className="stagger" sx={{ mb: 3 }}>
-        <Grid size={{ xs: 12, sm: 6, lg: 4 }}><StatTile label="Bank Accounts" value={accounts.length} icon={AccountBalanceIcon} color="primary" /></Grid>
-        <Grid size={{ xs: 12, sm: 6, lg: 4 }}><StatTile label="Active" value={activeCount} icon={CheckCircleIcon} color="success" /></Grid>
-        <Grid size={{ xs: 12, sm: 6, lg: 4 }}><StatTile label="Inactive" value={accounts.length - activeCount} icon={BlockIcon} color="warning" /></Grid>
+        <Grid size={{ xs: 12, sm: 6, lg: 4 }}><StatTile label="Bank Accounts" value={totalAccounts} icon={AccountBalanceIcon} color="primary" /></Grid>
+        <Grid size={{ xs: 12, sm: 6, lg: 4 }}><StatTile label="Active" value={0} icon={CheckCircleIcon} color="success" /></Grid>
+        <Grid size={{ xs: 12, sm: 6, lg: 4 }}><StatTile label="Inactive" value={0} icon={BlockIcon} color="warning" /></Grid>
       </Grid>
 
       <Paper variant="outlined" sx={{ overflow: "hidden" }}>
@@ -294,19 +311,20 @@ export default function BankAccounts() {
 
         <Divider />
 
-        <Box sx={{ height: 560 }}>
+        {/* A flex-column parent lets the grid grow with its rows, so the page
+            scrolls instead of the grid clipping rows inside a fixed box. */}
+        <Box sx={{ display: "flex", flexDirection: "column" }}>
           <DataGrid
             rows={filtered}
             columns={columns}
             getRowId={(r) => r.id}
-            loading={loading}
+            loading={list.loading}
             disableRowSelectionOnClick
-            paginationModel={paginationModel}
-            onPaginationModelChange={setPaginationModel}
+            {...list.gridProps}
             pageSizeOptions={[5, 10, 25, 50, 100]}
             localeText={{
-              noRowsLabel: accounts.length ? "No accounts match your filters." : "No bank accounts yet. Add the first one above.",
-              paginationDisplayedRows: paginationDisplayedRows(paginationModel),
+              noRowsLabel: filtering ? "No accounts match your filters." : "No bank accounts yet. Add the first one above.",
+              paginationDisplayedRows: paginationDisplayedRows(list.paginationModel),
             }}
             rowHeight={56}
           />

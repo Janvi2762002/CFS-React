@@ -18,12 +18,12 @@ import { useAuth } from "../common/AuthContext";
 import { paginationDisplayedRows } from "../components/gridPagination";
 import { formatGridDate } from "../components/gridDate";
 import { toLocalDateTime } from "../services/payload";
+import { DEFAULT_PAGE_SIZE } from "../services/paginate";
 
 export default function CashLedger() {
   const { user } = useAuth();
   const [entries,         setEntries]         = useState([]);
-  const [rowCount,        setRowCount]        = useState(0);
-  const [paginationModel, setPaginationModel] = useState({ page: 0, pageSize: 25 });
+  const [paginationModel, setPaginationModel] = useState({ page: 0, pageSize: DEFAULT_PAGE_SIZE });
   const [totals,          setTotals]          = useState({ opening: 0, in: 0, out: 0, current: 0 });
   const [loading,         setLoading]         = useState(true);
   const [open,            setOpen]            = useState(false);
@@ -36,31 +36,34 @@ export default function CashLedger() {
   const [confirm,         setConfirm]         = useState({ open: false, id: null });
   const isMobile = useMediaQuery("(max-width:768px)");
 
+  /* /CashLedger takes no paging parameters and always returns every entry,
+     so it is loaded once and the grid pages it locally. Changing the page or
+     page size then costs no request; only a save or delete reloads. */
   const loadData = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const [{ data, total }, op, tin, tout, cur] = await Promise.all([
-        CashLedgerService.getEntriesPaginated({
-          page: paginationModel.page + 1,
-          pageSize: paginationModel.pageSize,
-        }),
+      const [data, op, tin, tout, cur] = await Promise.all([
+        CashLedgerService.getEntriesNewestFirst(),
         CashLedgerService.getOpeningTotal(),
         CashLedgerService.getInTotal(),
         CashLedgerService.getOutTotal(),
         CashLedgerService.getCurrentBalance(),
       ]);
       setEntries(data || []);
-      setRowCount(total);
       setTotals({ opening: op || 0, in: tin || 0, out: tout || 0, current: cur || 0 });
     } catch (e) {
       setEntries([]);
-      setRowCount(0);
       setError(e?.message || "Could not load cash ledger data.");
     } finally { setLoading(false); }
-  }, [paginationModel]);
+  }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  /* A new search or type filter starts again from the first page. */
+  useEffect(() => {
+    setPaginationModel((m) => (m.page === 0 ? m : { ...m, page: 0 }));
+  }, [search, typeFilter]);
 
   const handleOpen = (item = null) => {
     if (item) {
@@ -125,7 +128,7 @@ export default function CashLedger() {
     }
   };
 
-  /* Client-side search/filter on the current page */
+  /* Search and filter cover the whole ledger. */
   const filtered = useMemo(() => {
     return entries.filter((i) => {
       const q = search.toLowerCase();
@@ -202,13 +205,13 @@ export default function CashLedger() {
 
         <Divider />
 
-        <Box sx={{ height: 560 }}>
+        {/* A flex-column parent lets the grid grow with its rows, so the page
+            scrolls instead of the grid clipping rows inside a fixed box. */}
+        <Box sx={{ display: "flex", flexDirection: "column" }}>
           <DataGrid
             rows={filtered}
             columns={columns}
-            rowCount={rowCount}
             loading={loading}
-            paginationMode="server"
             paginationModel={paginationModel}
             onPaginationModelChange={setPaginationModel}
             pageSizeOptions={[5, 10, 25, 50, 100]}

@@ -12,6 +12,7 @@ import { saveAs } from "file-saver";
 import AdminService from "../services/AdminService";
 import { paginationDisplayedRows } from "../components/gridPagination";
 import { formatGridDate } from "../components/gridDate";
+import { DEFAULT_PAGE_SIZE } from "../services/paginate";
 
 /* ── Money cell ──────────────────────────────────────────────────────────── */
 /* A null amount renders as a dash: printing ₹0 would claim a value the API
@@ -39,7 +40,7 @@ const EXPORT_COLUMNS = [
 export default function CardPayments() {
   const [rows,            setRows]            = useState([]);
   const [rowCount,        setRowCount]        = useState(0);
-  const [paginationModel, setPaginationModel] = useState({ page: 0, pageSize: 25 });
+  const [paginationModel, setPaginationModel] = useState({ page: 0, pageSize: DEFAULT_PAGE_SIZE });
   const [search,          setSearch]          = useState("");
   const [partyFilter,     setPartyFilter]     = useState("");
   const [loading,         setLoading]         = useState(true);
