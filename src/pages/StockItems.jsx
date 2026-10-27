@@ -14,10 +14,18 @@ import Inventory2Icon from "@mui/icons-material/Inventory2Outlined";
 import StatTile from "../components/StatTile";
 import ConfirmDialog from "../components/ConfirmDialog";
 import StockItemService from "../services/StockItemService";
+import StockPaymentInfoService from "../services/StockPaymentInfoService";
+import { isConflict } from "../services/apiClient";
 import usePagedList from "../common/usePagedList";
 import { paginationDisplayedRows } from "../components/gridPagination";
 import { formatGridDate } from "../components/gridDate";
 import { toLocalDateTime } from "../services/payload";
+
+/* Once an item's payment is completed the server refuses changes to its
+   money side (409) and refuses to delete it. Descriptive fields stay open. */
+const LOCKED_MESSAGE =
+  "This item's payment is completed, so its amount, party and IN/OUT details can't change and it can't be deleted. " +
+  "Reset the payment under Stock Payments first.";
 
 /* Stable references, so the paging hook does not refetch on every render. */
 const fetchItemsPage = (p) => StockItemService.getItemsPaginated(p);
@@ -33,6 +41,9 @@ export default function StockItems() {
   const [error,           setError]           = useState("");
   const [formData,        setFormData]        = useState({});
   const [confirm,         setConfirm]         = useState({ open: false, id: null });
+  /* Whether the item being edited has a completed payment, and whether that is still being checked. */
+  const [paymentLocked,   setPaymentLocked]   = useState(false);
+  const [checkingPayment, setCheckingPayment] = useState(false);
   const isMobile = useMediaQuery("(max-width:768px)");
 
   /* The grid pages on the server. Search and the status / IN-OUT filters
@@ -61,6 +72,14 @@ export default function StockItems() {
         remarks: item.remarks || ""
       });
       setIsEditing(true);
+      /* Ask the item's payment whether it is settled, so the money fields
+         can be locked before an edit is refused. */
+      setPaymentLocked(false);
+      setCheckingPayment(true);
+      StockPaymentInfoService.getByStockItem(item.id)
+        .then((payments) => setPaymentLocked(payments.some((pay) => pay.paymentStatus === "Completed")))
+        .catch(() => setPaymentLocked(false)) // the server still refuses a locked change
+        .finally(() => setCheckingPayment(false));
     } else {
       setFormData({
         no: "", inDate: toLocalDateTime(new Date()).slice(0, 10), outDate: "",
@@ -68,13 +87,20 @@ export default function StockItems() {
         payment: "Cash", inOut: "IN", status: "Available", soldTo: "", remarks: ""
       });
       setIsEditing(false);
+      setPaymentLocked(false);
+      setCheckingPayment(false);
     }
     setOpen(true);
   };
 
   const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
-  const canSubmit = formData.no?.trim() && formData.model?.trim() && formData.amount;
+  /* The server opens a payment for each item: IN is owed to the supplier
+     (Party Name), OUT is owed by the buyer (Sold To), so that party is needed. */
+  const isOut = formData.inOut === "OUT";
+  const counterpartyMissing = isOut ? !formData.soldTo?.trim() : !formData.partyName?.trim();
+  const canSubmit = formData.no?.trim() && formData.model?.trim() && formData.amount &&
+    !counterpartyMissing && !checkingPayment;
 
   const handleSave = async () => {
     setSaving(true); setError("");
@@ -94,12 +120,26 @@ export default function StockItems() {
       setOpen(false);
       loadItems();
     } catch (e) {
-      setError(e?.message || "Could not update the item.");
+      setError(isConflict(e) ? LOCKED_MESSAGE : e?.message || "Could not update the item.");
     } finally { setSaving(false); }
   };
 
+  /* Look at the item's payment before asking: a completed one blocks the
+     delete, and a pending one is removed along with the item. */
   const handleDelete = async (id) => {
-    setConfirm({ open: true, id });
+    setError("");
+    let payments = [];
+    try {
+      payments = await StockPaymentInfoService.getByStockItem(id);
+    } catch {
+      // Unknown: ask anyway; the server still refuses a locked delete.
+    }
+    if (payments.some((pay) => pay.paymentStatus === "Completed")) {
+      setError(LOCKED_MESSAGE);
+      return;
+    }
+    const pending = payments.find((pay) => pay.paymentStatus === "Pending");
+    setConfirm({ open: true, id, pending });
   };
 
   const handleDeleteConfirmed = async () => {
@@ -109,7 +149,7 @@ export default function StockItems() {
       await StockItemService.deleteItem(id);
       loadItems();
     } catch (e) {
-      setError(e?.message || "Could not delete the item.");
+      setError(isConflict(e) ? LOCKED_MESSAGE : e?.message || "Could not delete the item.");
     }
   };
 
@@ -238,6 +278,12 @@ export default function StockItems() {
         <DialogTitle>{isEditing ? "Edit Stock Item" : "Add Stock Item"}</DialogTitle>
         <Divider />
         <DialogContent>
+          {paymentLocked && (
+            <Alert severity="info" sx={{ mb: 2 }}>
+              This item's payment is completed, so Amount, GST MRP, Party, Sold To, Payment, IN/OUT and Status
+              are locked. Reset the payment under Stock Payments to change them.
+            </Alert>
+          )}
           <Grid container spacing={2} sx={{ mt: 0 }}>
             <Grid size={{ xs: 12, sm: 4 }}>
               <TextField label="No." name="no" required fullWidth value={formData.no} onChange={handleChange} />
@@ -260,30 +306,36 @@ export default function StockItems() {
             </Grid>
 
             <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField label="Party Name" name="partyName" fullWidth value={formData.partyName} onChange={handleChange} />
+              <TextField label="Party Name (supplier)" name="partyName" fullWidth
+                required={!isOut} disabled={paymentLocked}
+                value={formData.partyName} onChange={handleChange}
+                helperText={isOut ? "Who it was bought from (optional)" : "A payment to this supplier is created automatically"} />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField label="Sold To" name="soldTo" fullWidth value={formData.soldTo} onChange={handleChange} />
+              <TextField label="Sold To (buyer)" name="soldTo" fullWidth
+                required={isOut} disabled={paymentLocked}
+                value={formData.soldTo} onChange={handleChange}
+                helperText={isOut ? "A payment to receive from this buyer is created automatically" : "Only needed for OUT items"} />
             </Grid>
 
             <Grid size={{ xs: 12, sm: 4 }}>
-              <TextField label="GST MRP" name="gstMrp" type="number" fullWidth value={formData.gstMrp} onChange={handleChange} />
+              <TextField label="GST MRP" name="gstMrp" type="number" fullWidth disabled={paymentLocked} value={formData.gstMrp} onChange={handleChange} />
             </Grid>
             <Grid size={{ xs: 12, sm: 4 }}>
-              <TextField label="Amount" name="amount" type="number" required fullWidth value={formData.amount} onChange={handleChange} />
+              <TextField label="Amount" name="amount" type="number" required fullWidth disabled={paymentLocked} value={formData.amount} onChange={handleChange} />
             </Grid>
             <Grid size={{ xs: 12, sm: 4 }}>
-              <TextField label="Payment" name="payment" fullWidth value={formData.payment} onChange={handleChange} />
+              <TextField label="Payment" name="payment" fullWidth disabled={paymentLocked} value={formData.payment} onChange={handleChange} />
             </Grid>
 
             <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField select label="IN/OUT" name="inOut" fullWidth value={formData.inOut} onChange={handleChange}>
+              <TextField select label="IN/OUT" name="inOut" fullWidth disabled={paymentLocked} value={formData.inOut} onChange={handleChange}>
                 <MenuItem value="IN">IN</MenuItem>
                 <MenuItem value="OUT">OUT</MenuItem>
               </TextField>
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField select label="Status" name="status" fullWidth value={formData.status} onChange={handleChange}>
+              <TextField select label="Status" name="status" fullWidth disabled={paymentLocked} value={formData.status} onChange={handleChange}>
                 <MenuItem value="Available">Available</MenuItem>
                 <MenuItem value="Sold">Sold</MenuItem>
                 <MenuItem value="Returned">Returned</MenuItem>
@@ -299,7 +351,7 @@ export default function StockItems() {
         <DialogActions sx={{ px: 3, py: 2 }}>
           <Button onClick={() => setOpen(false)}>Cancel</Button>
           <Button variant="contained" disabled={saving || !canSubmit} onClick={isEditing ? handleUpdate : handleSave}>
-            {saving ? "Saving…" : isEditing ? "Update Item" : "Create Item"}
+            {saving ? "Saving…" : checkingPayment ? "Checking payment…" : isEditing ? "Update Item" : "Create Item"}
           </Button>
         </DialogActions>
       </Dialog>
@@ -307,7 +359,11 @@ export default function StockItems() {
       <ConfirmDialog
         open={confirm.open}
         title="Delete item?"
-        message="This action cannot be undone. Are you sure you want to delete this stock item?"
+        message={confirm.pending
+          ? `Its pending ${confirm.pending.paymentType === "Receivable" ? "receivable from" : "payable to"} ` +
+            `${confirm.pending.partyName || "the party"} (₹${Number(confirm.pending.outstandingAmount || 0).toLocaleString("en-IN")}) ` +
+            "will be deleted with it. This cannot be undone."
+          : "This action cannot be undone. Are you sure you want to delete this stock item?"}
         confirmLabel="Delete Item"
         onConfirm={handleDeleteConfirmed}
         onClose={() => setConfirm((s) => ({ ...s, open: false }))}

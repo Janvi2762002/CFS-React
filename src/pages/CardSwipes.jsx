@@ -15,6 +15,7 @@ import ClearIcon from "@mui/icons-material/Clear";
 import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 import AdminService from "../services/AdminService";
+import { isConflict } from "../services/apiClient";
 import usePagedList from "../common/usePagedList";
 import ConfirmDialog from "../components/ConfirmDialog";
 import { useAuth } from "../common/AuthContext";
@@ -27,10 +28,16 @@ import { toLocalDateTime } from "../services/payload";
 const NEWEST_FIRST = { sorting: { sortModel: [{ field: "date", sort: "desc" }] } };
 
 const STATUS_FILTERS = [
-  { id: "all",     label: "All statuses" },
-  { id: "used",    label: "Limit used" },
-  { id: "pending", label: "Pending" },
+  { id: "all",       label: "All swipes" },
+  { id: "unsettled", label: "Unsettled" },
+  { id: "settled",   label: "Settled" },
+  { id: "used",      label: "Card limit used" },
+  { id: "notUsed",   label: "Card limit not used" },
 ];
+
+/* A settled swipe has been paid out to its party; the server refuses to
+   change or delete it (409). */
+const SETTLED_MESSAGE = "This swipe is settled, so it can't be changed or deleted.";
 
 /* Stable references, so the paging hook does not refetch on every render. */
 const fetchSwipesPage = (p) => AdminService.getCardInfoPaginated(p);
@@ -73,6 +80,12 @@ export default function CardSwipes() {
 
   const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
+  /* The API requires card name and number, party and bank. */
+  const canSubmit = Boolean(
+    formData.cardName?.trim() && formData.cardNumber?.toString().trim() &&
+    formData.partyName?.trim() && formData.bankName?.trim()
+  );
+
   const handleSave = async () => {
     setSaving(true); setError("");
     try {
@@ -91,7 +104,7 @@ export default function CardSwipes() {
       setOpen(false);
       fetchData();
     } catch (e) {
-      setError(e?.message || "Could not update the swipe entry.");
+      setError(isConflict(e) ? SETTLED_MESSAGE : e?.message || "Could not update the swipe entry.");
     } finally { setSaving(false); }
   };
 
@@ -102,7 +115,7 @@ export default function CardSwipes() {
       await AdminService.deleteCard(id);
       fetchData();
     } catch (e) {
-      setError(e?.message || "Could not delete the swipe entry.");
+      setError(isConflict(e) ? SETTLED_MESSAGE : e?.message || "Could not delete the swipe entry.");
     }
   };
 
@@ -122,8 +135,10 @@ export default function CardSwipes() {
         (r.bankName || "").toLowerCase().includes(search.toLowerCase());
       const matchesFilter =
         filterStatus === "all" ? true :
+        filterStatus === "settled" ? Boolean(r.isSettled) :
+        filterStatus === "unsettled" ? !r.isSettled :
         filterStatus === "used" ? Boolean(r.limitUsed) :
-        filterStatus === "pending" ? !r.limitUsed : true;
+        filterStatus === "notUsed" ? !r.limitUsed : true;
       return matchesSearch && matchesFilter;
     });
   }, [list.rows, search, filterStatus]);
@@ -152,12 +167,18 @@ export default function CardSwipes() {
     reader.onload = async (ev) => {
       const wb = XLSX.read(new Uint8Array(ev.target.result), { type: "array" });
       const data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
-      const valid = data.filter((r) => r.cardName && r.cardNumber);
+      /* The API rejects a swipe without card name, number, party or bank. */
+      const valid = data.filter((r) => r.cardName && r.cardNumber && r.partyName && r.bankName);
+      const skipped = data.length - valid.length;
       let failed = 0;
       for (const row of valid) {
         try { await AdminService.saveCard(row); } catch { failed += 1; }
       }
-      if (failed) setError(`${failed} of ${valid.length} imported rows could not be saved.`);
+      const problems = [
+        skipped ? `${skipped} row${skipped === 1 ? " was" : "s were"} skipped for missing card name, card number, party or bank` : "",
+        failed ? `${failed} of ${valid.length} rows could not be saved` : "",
+      ].filter(Boolean);
+      if (problems.length) setError(`Import finished: ${problems.join("; ")}.`);
       fetchData();
     };
     e.target.value = "";
@@ -206,29 +227,48 @@ export default function CardSwipes() {
     { field: "additionalInfo", headerName: "Info",       width: 120,
       renderCell: (p) => p.value || "—" },
     {
-      field: "limitUsed", headerName: "Status", width: 110,
+      field: "isSettled", headerName: "Payment", width: 120,
+      renderCell: (p) => (
+        <Tooltip title={p.value && p.row.settledAt ? `Settled on ${formatGridDate(p.row.settledAt)}` : ""}>
+          <Chip size="small" variant="outlined"
+            color={p.value ? "success" : "warning"}
+            label={p.value ? "Settled" : "Unsettled"}
+          />
+        </Tooltip>
+      ),
+    },
+    {
+      field: "limitUsed", headerName: "Card Limit", width: 110,
       renderCell: (p) => (
         <Chip size="small" variant="outlined"
-          color={p.value ? "success" : "warning"}
-          label={p.value ? "Used" : "Pending"}
+          color={p.value ? "info" : "default"}
+          label={p.value ? "Used" : "Not used"}
         />
       ),
     },
     ...(canEdit ? [{
       field: "actions", headerName: "Actions", width: 100, sortable: false, align: "right", headerAlign: "right",
-      renderCell: (p) => (
-        <Stack direction="row" spacing={0.5} justifyContent="flex-end">
-          <Tooltip title="Edit record">
-            <IconButton size="small" onClick={() => handleOpen(p.row)}><Edit fontSize="small" /></IconButton>
-          </Tooltip>
-          <Tooltip title="Delete record">
-            <IconButton size="small" color="error"
-              onClick={() => setConfirm({ open: true, id: p.row.id })}>
-              <Delete fontSize="small" />
-            </IconButton>
-          </Tooltip>
-        </Stack>
-      ),
+      renderCell: (p) => {
+        const locked = Boolean(p.row.isSettled);
+        const lockedTip = `Settled${p.row.settledAt ? ` on ${formatGridDate(p.row.settledAt)}` : ""} — can't be changed`;
+        return (
+          <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+            <Tooltip title={locked ? lockedTip : "Edit record"}>
+              <span>
+                <IconButton size="small" disabled={locked} onClick={() => handleOpen(p.row)}><Edit fontSize="small" /></IconButton>
+              </span>
+            </Tooltip>
+            <Tooltip title={locked ? lockedTip : "Delete record"}>
+              <span>
+                <IconButton size="small" color="error" disabled={locked}
+                  onClick={() => setConfirm({ open: true, id: p.row.id })}>
+                  <Delete fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+          </Stack>
+        );
+      },
     }] : []),
   ];
 
@@ -270,7 +310,7 @@ export default function CardSwipes() {
             }}
           />
           <TextField select label="Status" value={filterStatus}
-            onChange={(e) => setFilterStatus(e.target.value)} sx={{ minWidth: 180 }}>
+            onChange={(e) => setFilterStatus(e.target.value)} sx={{ minWidth: 190 }}>
             {STATUS_FILTERS.map((f) => <MenuItem key={f.id} value={f.id}>{f.label}</MenuItem>)}
           </TextField>
           <Box sx={{ flexGrow: 1 }} />
@@ -317,18 +357,20 @@ export default function CardSwipes() {
                 onChange={handleChange} InputLabelProps={{ shrink: true }} />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField label="Party Name" name="partyName" fullWidth value={formData.partyName || ""} onChange={handleChange} />
+              <TextField label="Party Name" name="partyName" required fullWidth value={formData.partyName || ""} onChange={handleChange}
+                inputProps={{ maxLength: 150 }} helperText="Who this swipe is paid out to" />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
               <TextField label="Card Name" name="cardName" required fullWidth placeholder="e.g. HDFC Regalia"
-                value={formData.cardName || ""} onChange={handleChange} />
+                value={formData.cardName || ""} onChange={handleChange} inputProps={{ maxLength: 100 }} />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField label="Card Number" name="cardNumber" required fullWidth value={formData.cardNumber || ""} onChange={handleChange} />
+              <TextField label="Card Number" name="cardNumber" required fullWidth value={formData.cardNumber || ""} onChange={handleChange}
+                inputProps={{ maxLength: 100 }} />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField label="Bank Name" name="bankName" fullWidth placeholder="e.g. ICICI Bank"
-                value={formData.bankName || ""} onChange={handleChange} />
+              <TextField label="Bank Name" name="bankName" required fullWidth placeholder="e.g. ICICI Bank"
+                value={formData.bankName || ""} onChange={handleChange} inputProps={{ maxLength: 50 }} />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
               <TextField label="Swipe Amount (₹)" name="deduction" type="number" fullWidth value={formData.deduction || ""} onChange={handleChange} />
@@ -339,19 +381,19 @@ export default function CardSwipes() {
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
               <TextField label="Merchant" name="merchant" fullWidth
-                value={formData.merchant || ""} onChange={handleChange} />
+                value={formData.merchant || ""} onChange={handleChange} inputProps={{ maxLength: 200 }} />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
               <TextField label="Swipe Person" name="swipePerson" fullWidth
-                value={formData.swipePerson || ""} onChange={handleChange} />
+                value={formData.swipePerson || ""} onChange={handleChange} inputProps={{ maxLength: 150 }} />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
               <TextField label="Device Model" name="model" fullWidth
-                value={formData.model || ""} onChange={handleChange} />
+                value={formData.model || ""} onChange={handleChange} inputProps={{ maxLength: 200 }} />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
               <TextField label="IMEI" name="imei" fullWidth
-                value={formData.imei || ""} onChange={handleChange} />
+                value={formData.imei || ""} onChange={handleChange} inputProps={{ maxLength: 100 }} />
             </Grid>
             <Grid size={{ xs: 12, sm: 6 }}>
               <TextField label="POS / Outlet" name="pos" fullWidth value={formData.pos || ""} onChange={handleChange} />
@@ -365,7 +407,7 @@ export default function CardSwipes() {
             <Grid size={12}>
               <FormControlLabel
                 control={<Checkbox checked={Boolean(formData.limitUsed)} onChange={(e) => setFormData({ ...formData, limitUsed: e.target.checked })} />}
-                label="Limit used / settled"
+                label="Card limit used"
               />
             </Grid>
           </Grid>
@@ -373,7 +415,7 @@ export default function CardSwipes() {
         <Divider />
         <DialogActions sx={{ px: 3, py: 2 }}>
           <Button onClick={() => setOpen(false)}>Cancel</Button>
-          <Button variant="contained" disabled={saving || !formData.cardName || !formData.cardNumber}
+          <Button variant="contained" disabled={saving || !canSubmit}
             onClick={isEditing ? handleUpdate : handleSave}>
             {saving ? "Saving…" : isEditing ? "Save Changes" : "Create Swipe"}
           </Button>

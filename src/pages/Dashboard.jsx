@@ -9,10 +9,57 @@ import AccountBalanceIcon from "@mui/icons-material/AccountBalanceOutlined";
 import ReceiptLongIcon from "@mui/icons-material/ReceiptLongOutlined";
 import TrendingUpIcon from "@mui/icons-material/TrendingUpOutlined";
 import InventoryIcon from "@mui/icons-material/Inventory2Outlined";
+import PendingIcon from "@mui/icons-material/PendingActionsOutlined";
+import PayIcon from "@mui/icons-material/PaymentsOutlined";
+import ReceiveIcon from "@mui/icons-material/SavingsOutlined";
 import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 import DashboardService from "../services/DashboardService";
 
 const inr = (n) => `₹${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+
+/* One figure with a link to the page behind it, in the same shape as the
+   cards above. */
+function MetricCard({ icon: Icon, color, title, value, caption, linkLabel, onClick }) {
+  return (
+    <Paper
+      variant="outlined"
+      sx={{
+        p: 2,
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "space-between",
+        borderRadius: 1.5,
+        transition: "transform 0.15s ease, box-shadow 0.15s ease",
+        "&:hover": { transform: "translateY(-1px)", boxShadow: 1 },
+      }}
+    >
+      <Box>
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+          <Box sx={{ p: 0.75, borderRadius: 1, bgcolor: `${color}.50`, color: `${color}.main`, display: "flex" }}>
+            <Icon sx={{ fontSize: 20 }} />
+          </Box>
+          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>{title}</Typography>
+        </Stack>
+        <Typography variant="h6" className="tabular-nums" sx={{ fontWeight: 700, color: `${color}.main`, my: 0.5, fontSize: "1.35rem" }}>
+          {value}
+        </Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ mb: 2, display: "block" }}>
+          {caption}
+        </Typography>
+      </Box>
+      <Button
+        variant="outlined"
+        size="small"
+        color={color}
+        endIcon={<ArrowForwardIcon sx={{ fontSize: "0.85rem !important" }} />}
+        onClick={onClick}
+        sx={{ alignSelf: "flex-start", py: 0.25, px: 1, fontSize: "0.75rem" }}
+      >
+        {linkLabel}
+      </Button>
+    </Paper>
+  );
+}
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -58,6 +105,12 @@ export default function Dashboard() {
   const swipes = summary?.totalSwipes || 0;
   const profit = summary?.totalPartyProfit || 0;
   const stockItems = summary?.totalStockItems || 0;
+
+  const pendingParty = summary?.totalPendingPartyPayment || 0;
+  const availableCount = summary?.availableStockCount || 0;
+  const availableValue = summary?.availableStockValue || 0;
+  const stockPayable = summary?.pendingStockPayable || 0;
+  const stockReceivable = summary?.pendingStockReceivable || 0;
 
   return (
     <Box className="page-enter">
@@ -362,6 +415,44 @@ export default function Dashboard() {
             View Stock Items →
           </Button>
         </Paper>
+      </Box>
+
+      {/* PENDING SETTLEMENTS & STOCK Section */}
+      <Typography variant="caption" color="text.secondary" sx={{ mt: 3, mb: 1, display: "block", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, fontSize: "0.75rem" }}>
+        PENDING SETTLEMENTS & STOCK
+      </Typography>
+
+      <Box
+        sx={{
+          display: "grid",
+          gridTemplateColumns: {
+            xs: "1fr",
+            sm: "repeat(2, 1fr)",
+            lg: "repeat(4, 1fr)",
+          },
+          gap: 2,
+        }}
+      >
+        <MetricCard
+          icon={PendingIcon} color="warning" title="Pending Party Payments"
+          value={inr(pendingParty)} caption="Swipe amounts not yet paid to parties"
+          linkLabel="View Card Payments →" onClick={() => navigate("/payments")}
+        />
+        <MetricCard
+          icon={InventoryIcon} color="info" title="Available Stock"
+          value={inr(availableValue)} caption={`${availableCount.toLocaleString()} item${availableCount === 1 ? "" : "s"} in stock`}
+          linkLabel="View Stock Items →" onClick={() => navigate("/stock-items")}
+        />
+        <MetricCard
+          icon={PayIcon} color="error" title="To Pay Suppliers"
+          value={inr(stockPayable)} caption="Pending stock payables"
+          linkLabel="View Stock Payments →" onClick={() => navigate("/stock-payments")}
+        />
+        <MetricCard
+          icon={ReceiveIcon} color="success" title="To Receive from Buyers"
+          value={inr(stockReceivable)} caption="Pending stock receivables"
+          linkLabel="View Stock Payments →" onClick={() => navigate("/stock-payments")}
+        />
       </Box>
     </Box>
   );

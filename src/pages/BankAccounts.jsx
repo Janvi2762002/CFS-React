@@ -17,6 +17,7 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircleOutline";
 import BlockIcon from "@mui/icons-material/Block";
 import StatTile from "../components/StatTile";
 import ConfirmDialog from "../components/ConfirmDialog";
+import FormDrawer, { FormSection } from "../components/FormDrawer";
 import { maskAccountNo } from "../components/BankAccountSlider";
 import BankAccountService from "../services/BankAccountService";
 import BankTransactionService from "../services/BankTransactionService";
@@ -331,79 +332,117 @@ export default function BankAccounts() {
         </Box>
       </Paper>
 
-      {/* ── Add / Edit dialog ───────────────────────────────────────────── */}
-      <Dialog open={open} onClose={() => !saving && setOpen(false)} maxWidth="sm" fullWidth fullScreen={isMobile}>
-        <DialogTitle>{isEditing ? "Edit Bank Account" : "Add Bank Account"}</DialogTitle>
-        <Divider />
-        <DialogContent>
-          {formError && <Alert severity="error" sx={{ mb: 2 }}>{formError}</Alert>}
-          <Grid container spacing={2} sx={{ mt: 0 }}>
+      {/* ── Add / Edit Slide-Over Form Drawer ─────────────────────────────── */}
+      <FormDrawer
+        open={open}
+        onClose={() => !saving && setOpen(false)}
+        title={isEditing ? "Edit Bank Account" : "Add Bank Account"}
+        subtitle={isEditing ? "Update account details and active status." : "Register a new bank account in the ledger system."}
+        icon={AccountBalanceIcon}
+        onSave={handleSubmit}
+        saving={saving}
+        disableSave={!canSubmit}
+        saveText={isEditing ? "Save Changes" : "Create Account"}
+      >
+        {formError && <Alert severity="error" sx={{ mb: 2.5 }}>{formError}</Alert>}
+
+        <FormSection title="Account Identity" subtitle="Primary bank details and account numbering">
+          <Grid container spacing={2}>
             <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField label="Bank Name" name="bankName" required fullWidth autoFocus
+              <TextField
+                label="Bank Name"
+                name="bankName"
+                required
+                fullWidth
+                autoFocus
                 placeholder="e.g. HDFC Bank"
-                value={formData.bankName} onChange={handleChange} inputProps={{ maxLength: 150 }} />
-            </Grid>
-            <Grid size={{ xs: 12, sm: 6 }}>
-              <TextField label="Account Name" name="accountName" required fullWidth
-                placeholder="e.g. Current A/C"
-                value={formData.accountName} onChange={handleChange} inputProps={{ maxLength: 150 }} />
-            </Grid>
-            <Grid size={12}>
-              <TextField label="Account Number" name="accountNo" fullWidth
-                value={formData.accountNo} onChange={handleChange} inputProps={{ maxLength: 50 }}
-                error={Boolean(duplicate)}
-                helperText={duplicate
-                  ? `Already added as ${duplicate.bankName} · ${duplicate.accountName}`
-                  : "Only the last four digits are shown elsewhere in the app."} />
-            </Grid>
-
-            {!isEditing && (
-              <>
-                <Grid size={{ xs: 12, sm: 6 }}>
-                  <TextField label="Opening Balance" name="openingBalance" type="number" fullWidth
-                    value={formData.openingBalance} onChange={handleChange}
-                    inputProps={{ min: 0, step: "0.01" }}
-                    InputProps={{ startAdornment: <InputAdornment position="start">₹</InputAdornment> }}
-                    error={!openingValid && formData.openingBalance !== ""}
-                    helperText="Optional. Recorded as the account's Opening transaction." />
-                </Grid>
-                <Grid size={{ xs: 12, sm: 6 }}>
-                  <TextField label="Opening Date" name="openingDate" type="date" fullWidth
-                    InputLabelProps={{ shrink: true }}
-                    value={formData.openingDate} onChange={handleChange}
-                    disabled={!(opening > 0)} />
-                </Grid>
-              </>
-            )}
-
-            <Grid size={12}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={Boolean(formData.isActive)}
-                    onChange={(e) => setFormData((f) => ({ ...f, isActive: e.target.checked }))}
-                  />
-                }
-                label="Active — inactive accounts take no new transactions"
+                value={formData.bankName}
+                onChange={handleChange}
+                inputProps={{ maxLength: 150 }}
               />
             </Grid>
-            {isEditing && (
-              <Grid size={12}>
-                <Typography variant="caption" color="text.secondary">
-                  To change the opening balance, edit the account's Opening transaction under Transactions.
-                </Typography>
-              </Grid>
-            )}
+            <Grid size={{ xs: 12, sm: 6 }}>
+              <TextField
+                label="Account Name"
+                name="accountName"
+                required
+                fullWidth
+                placeholder="e.g. Current A/C"
+                value={formData.accountName}
+                onChange={handleChange}
+                inputProps={{ maxLength: 150 }}
+              />
+            </Grid>
+            <Grid size={12}>
+              <TextField
+                label="Account Number"
+                name="accountNo"
+                fullWidth
+                placeholder="e.g. 5010023456789"
+                value={formData.accountNo}
+                onChange={handleChange}
+                inputProps={{ maxLength: 50 }}
+                error={Boolean(duplicate)}
+                helperText={
+                  duplicate
+                    ? `Already added as ${duplicate.bankName} · ${duplicate.accountName}`
+                    : "Only the last four digits are shown elsewhere in the app."
+                }
+              />
+            </Grid>
           </Grid>
-        </DialogContent>
-        <Divider />
-        <DialogActions sx={{ px: 3, py: 2 }}>
-          <Button onClick={() => setOpen(false)} disabled={saving}>Cancel</Button>
-          <Button variant="contained" disabled={saving || !canSubmit} onClick={handleSubmit}>
-            {saving ? "Saving…" : isEditing ? "Save Changes" : "Add Account"}
-          </Button>
-        </DialogActions>
-      </Dialog>
+        </FormSection>
+
+        {!isEditing && (
+          <FormSection title="Opening Balance" subtitle="Initial financial setup (optional)">
+            <Grid container spacing={2}>
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <TextField
+                  label="Opening Balance"
+                  name="openingBalance"
+                  type="number"
+                  fullWidth
+                  value={formData.openingBalance}
+                  onChange={handleChange}
+                  inputProps={{ min: 0, step: "0.01" }}
+                  InputProps={{ startAdornment: <InputAdornment position="start">₹</InputAdornment> }}
+                  error={!openingValid && formData.openingBalance !== ""}
+                  helperText="Optional. Recorded as the account's Opening transaction."
+                />
+              </Grid>
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <TextField
+                  label="Opening Date"
+                  name="openingDate"
+                  type="date"
+                  fullWidth
+                  InputLabelProps={{ shrink: true }}
+                  value={formData.openingDate}
+                  onChange={handleChange}
+                  disabled={!(opening > 0)}
+                />
+              </Grid>
+            </Grid>
+          </FormSection>
+        )}
+
+        <FormSection title="Account Status & Controls">
+          <FormControlLabel
+            control={
+              <Switch
+                checked={Boolean(formData.isActive)}
+                onChange={(e) => setFormData((f) => ({ ...f, isActive: e.target.checked }))}
+              />
+            }
+            label="Active — inactive accounts take no new transactions"
+          />
+          {isEditing && (
+            <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 1 }}>
+              To change the opening balance, edit the account's Opening transaction under Transactions.
+            </Typography>
+          )}
+        </FormSection>
+      </FormDrawer>
 
       <ConfirmDialog
         open={confirm.open}

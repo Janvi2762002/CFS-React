@@ -57,6 +57,7 @@ const STATUS_FALLBACK = {
   401: "Your session has expired. Please sign in again.",
   403: "Your account does not have permission to do that.",
   404: "That record no longer exists.",
+  409: "That can't be done in the record's current state. Refresh and try again.",
   500: "The server hit an error. Please try again.",
 };
 
@@ -188,6 +189,12 @@ export function unwrap(response) {
   }
   return body;
 }
+
+/**
+ * True when the server refused because of the record's state (HTTP 409):
+ * a settled swipe, a completed stock payment, a repeated settlement.
+ */
+export const isConflict = (e) => e?.status === 409 || e?.statusCode === 409;
 
 export { refreshClient };
 export default apiClient;

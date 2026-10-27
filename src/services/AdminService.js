@@ -57,6 +57,14 @@ function toApiCard(card) {
   };
 }
 
+/** Party-name and status ("Pending" | "Paid") filters for /PaymentInfo. */
+function paymentFilters({ partyName, status } = {}) {
+  const params = {};
+  if (partyName?.trim()) params.partyName = partyName.trim();
+  if (status && status !== "all") params.status = status;
+  return params;
+}
+
 class AdminService {
   /* ── Users (Master / Admin only) ───────────────────────────────────── */
 
@@ -141,23 +149,32 @@ class AdminService {
   /**
    * Fetch the pre-computed party payment summary from the backend.
    * Rows carry: id, date, partyName, swipeCount, swipeAmount, totalAmount,
-   * profit, totalProfit, limitUsed, cardName, merchant, swipePerson, remarks.
+   * profit, totalProfit, paidAmount, pendingAmount, paymentStatus
+   * ("Pending" | "Paid"), lastPaidAt, lastPaidByUsername, limitUsed,
+   * cardName, merchant, swipePerson, remarks.
    * Returns { data: [], total: number, next, previous }.
-   * @param {{ page?: number, pageSize?: number, partyName?: string }} params  — 1-indexed page
+   * @param {{ page?: number, pageSize?: number, partyName?: string, status?: string }} params  — 1-indexed page
    */
-  async getPaymentInfo({ page = 1, pageSize = 25, partyName } = {}) {
-    const params = pageParams({ page, pageSize });
-    if (partyName?.trim()) params.partyName = partyName.trim();
+  async getPaymentInfo({ page = 1, pageSize = 25, ...filters } = {}) {
+    const params = { ...pageParams({ page, pageSize }), ...paymentFilters(filters) };
     const raw = unwrap(await apiClient.get("/PaymentInfo", { params }));
     return normaliseList(raw, page, pageSize);
   }
 
-  /** Every PaymentInfo row matching the party filter, for statement export. */
-  async getAllPaymentInfo({ partyName } = {}) {
-    const filter = partyName?.trim() ? { partyName: partyName.trim() } : {};
+  /** Every PaymentInfo row matching the filters, for statement export. */
+  async getAllPaymentInfo(filters = {}) {
     return fetchAllPages(async (params) =>
-      unwrap(await apiClient.get("/PaymentInfo", { params: { ...params, ...filter } }))
+      unwrap(await apiClient.get("/PaymentInfo", { params: { ...params, ...paymentFilters(filters) } }))
     );
+  }
+
+  /**
+   * Mark everything a party has pending as paid. The server settles each of
+   * the party's unsettled swipes, which then can no longer be edited or
+   * deleted. Admin / Master only; 409 when nothing is pending.
+   */
+  async markPartyPaid(paymentInfoId) {
+    return unwrap(await apiClient.patch(`/PaymentInfo/${paymentInfoId}/mark-paid`));
   }
 }
 
