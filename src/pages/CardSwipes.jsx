@@ -19,9 +19,9 @@ import { isConflict } from "../services/apiClient";
 import usePagedList from "../common/usePagedList";
 import ConfirmDialog from "../components/ConfirmDialog";
 import { useAuth } from "../common/AuthContext";
-import { paginationDisplayedRows } from "../components/gridPagination";
 import { formatGridDate } from "../components/gridDate";
 import { toLocalDateTime } from "../services/payload";
+import useCreateIntent from "../common/useCreateIntent";
 
 /* Sorting is in the browser, so while paging on the server this orders the
    page on screen; during a search it orders every match. */
@@ -62,7 +62,7 @@ export default function CardSwipes() {
   /* The grid pages on the server; the API has no search parameters, so a
      search or status filter loads the whole register and pages it locally. */
   const filtering = search.trim() !== "" || filterStatus !== "all";
-  const list = usePagedList({ fetchPage: fetchSwipesPage, fetchAll: fetchAllSwipes, filtering });
+  const list = usePagedList({ fetchPage: fetchSwipesPage, fetchAll: fetchAllSwipes, filtering, gridKey: "cardSwipes" });
   const fetchData = list.reload;
 
   const handleOpen = (row = null) => {
@@ -272,6 +272,9 @@ export default function CardSwipes() {
     }] : []),
   ];
 
+  // A module's "New …" button lands here with the Add dialog requested.
+  useCreateIntent(() => handleOpen());
+
   return (
     <Box className="page-enter">
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
@@ -294,7 +297,7 @@ export default function CardSwipes() {
         )}
       </Stack>
 
-      <Paper variant="outlined" sx={{ overflow: "hidden" }}>
+      <Paper variant="outlined" sx={{ overflow: "clip" }}>
         <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems={{ md: "center" }} sx={{ p: 2 }}>
           <TextField
             value={search} onChange={(e) => setSearch(e.target.value)}
@@ -334,11 +337,9 @@ export default function CardSwipes() {
             initialState={NEWEST_FIRST}
             loading={list.loading}
             {...list.gridProps}
-            pageSizeOptions={[5, 10, 25, 50, 100]}
             disableRowSelectionOnClick
             localeText={{
               noRowsLabel: "No card swipes match your filters.",
-              paginationDisplayedRows: paginationDisplayedRows(list.paginationModel),
             }}
             rowHeight={56}
           />

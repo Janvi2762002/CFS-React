@@ -18,10 +18,10 @@ import AmountField from "../components/AmountField";
 import FormDrawer, { FormSection } from "../components/FormDrawer";
 import StockPaymentInfoService from "../services/StockPaymentInfoService";
 import { isConflict } from "../services/apiClient";
-import { paginationDisplayedRows } from "../components/gridPagination";
 import { formatGridDate } from "../components/gridDate";
 import { toLocalDateTime } from "../services/payload";
-import { DEFAULT_PAGE_SIZE } from "../services/paginate";
+import usePaginationModel from "../common/usePaginationModel";
+import { gridPagerProps } from "../components/GridPager";
 
 const inr = (n) => `₹${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 const today = () => toLocalDateTime(new Date()).slice(0, 10);
@@ -80,13 +80,13 @@ export default function StockPayments() {
   /* ── Payments tab ───────────────────────────────────────────────────── */
   const [payments,        setPayments]        = useState([]);
   const [rowCount,        setRowCount]        = useState(0);
-  const [paginationModel, setPaginationModel] = useState({ page: 0, pageSize: DEFAULT_PAGE_SIZE });
+  const [paginationModel, setPaginationModel] = usePaginationModel("stockPayments");
   const [loading,         setLoading]         = useState(true);
 
   /* ── By-party tab ───────────────────────────────────────────────────── */
   const [parties,          setParties]          = useState([]);
   const [partyCount,       setPartyCount]       = useState(0);
-  const [partyPagination,  setPartyPagination]  = useState({ page: 0, pageSize: DEFAULT_PAGE_SIZE });
+  const [partyPagination,  setPartyPagination]  = usePaginationModel("stockPaymentParties");
   const [partiesLoading,   setPartiesLoading]   = useState(false);
 
   const [totals,  setTotals]  = useState(null);
@@ -114,7 +114,7 @@ export default function StockPayments() {
       setPartyPagination(firstPage);
     }, 350);
     return () => clearTimeout(t);
-  }, [search]);
+  }, [search, setPaginationModel, setPartyPagination]);
 
   const setFilter = (setter) => (e) => {
     setter(e.target.value);
@@ -353,7 +353,7 @@ export default function StockPayments() {
         </Grid>
       </Grid>
 
-      <Paper variant="outlined" sx={{ overflow: "hidden" }}>
+      <Paper variant="outlined" sx={{ overflow: "clip" }}>
         <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ px: 2, borderBottom: 1, borderColor: "divider" }}>
           <Tab value="payments" label="Payments" />
           <Tab value="parties" label="By party" />
@@ -407,13 +407,12 @@ export default function StockPayments() {
               paginationMode="server"
               paginationModel={paginationModel}
               onPaginationModelChange={setPaginationModel}
-              pageSizeOptions={[5, 10, 25, 50, 100]}
+              {...gridPagerProps}
               getRowId={(r) => r.id}
               initialState={{ columns: { columnVisibilityModel: { accountName: false, accountNo: false, ifsc: false, bank: false } } }}
               disableRowSelectionOnClick
               localeText={{
                 noRowsLabel: "No stock payments match your filters.",
-                paginationDisplayedRows: paginationDisplayedRows(paginationModel),
               }}
               rowHeight={56}
             />
@@ -426,13 +425,12 @@ export default function StockPayments() {
               paginationMode="server"
               paginationModel={partyPagination}
               onPaginationModelChange={setPartyPagination}
-              pageSizeOptions={[5, 10, 25, 50, 100]}
+              {...gridPagerProps}
               getRowId={(r) => `${r.partyName}|${r.paymentType}`}
               onRowClick={(p) => openParty(p.row)}
               disableRowSelectionOnClick
               localeText={{
                 noRowsLabel: "No parties match your filters.",
-                paginationDisplayedRows: paginationDisplayedRows(partyPagination),
               }}
               rowHeight={52}
               sx={{ "& .MuiDataGrid-row": { cursor: "pointer" } }}

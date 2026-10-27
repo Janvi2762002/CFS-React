@@ -30,3 +30,6 @@ yarn-debug.log*
 yarn-error.log*
 .eslintcache
 .cache
+
+# Seed script credentials (scripts/seed-test-data.mjs)
+scripts/seed.local.env

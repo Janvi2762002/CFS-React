@@ -15,15 +15,16 @@ import StatTile from "../components/StatTile";
 import ConfirmDialog from "../components/ConfirmDialog";
 import CashLedgerService from "../services/CashLedgerService";
 import { useAuth } from "../common/AuthContext";
-import { paginationDisplayedRows } from "../components/gridPagination";
 import { formatGridDate } from "../components/gridDate";
 import { toLocalDateTime } from "../services/payload";
-import { DEFAULT_PAGE_SIZE } from "../services/paginate";
+import usePaginationModel from "../common/usePaginationModel";
+import { gridPagerProps } from "../components/GridPager";
+import useCreateIntent from "../common/useCreateIntent";
 
 export default function CashLedger() {
   const { user } = useAuth();
   const [entries,         setEntries]         = useState([]);
-  const [paginationModel, setPaginationModel] = useState({ page: 0, pageSize: DEFAULT_PAGE_SIZE });
+  const [paginationModel, setPaginationModel] = usePaginationModel("cashLedger");
   const [totals,          setTotals]          = useState({ opening: 0, in: 0, out: 0, current: 0 });
   const [loading,         setLoading]         = useState(true);
   const [open,            setOpen]            = useState(false);
@@ -63,7 +64,7 @@ export default function CashLedger() {
   /* A new search or type filter starts again from the first page. */
   useEffect(() => {
     setPaginationModel((m) => (m.page === 0 ? m : { ...m, page: 0 }));
-  }, [search, typeFilter]);
+  }, [search, typeFilter, setPaginationModel]);
 
   const handleOpen = (item = null) => {
     if (item) {
@@ -160,6 +161,9 @@ export default function CashLedger() {
     },
   ];
 
+  // A module's "New …" button lands here with the Add dialog requested.
+  useCreateIntent(() => handleOpen());
+
   return (
     <Box className="page-enter">
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
@@ -181,7 +185,7 @@ export default function CashLedger() {
         <Grid size={{ xs: 12, sm: 6, md: 3 }}><StatTile label="Current Balance" value={`₹${totals.current.toLocaleString()}`} icon={AccountBalanceWalletIcon} color="info" /></Grid>
       </Grid>
 
-      <Paper variant="outlined" sx={{ overflow: "hidden" }}>
+      <Paper variant="outlined" sx={{ overflow: "clip" }}>
         <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems={{ sm: "center" }} sx={{ p: 2 }}>
           <TextField
             value={search}
@@ -214,12 +218,11 @@ export default function CashLedger() {
             loading={loading}
             paginationModel={paginationModel}
             onPaginationModelChange={setPaginationModel}
-            pageSizeOptions={[5, 10, 25, 50, 100]}
+            {...gridPagerProps}
             getRowId={(r) => r.id}
             disableRowSelectionOnClick
             localeText={{
               noRowsLabel: "No cash ledger entries found.",
-              paginationDisplayedRows: paginationDisplayedRows(paginationModel),
             }}
             rowHeight={56}
           />

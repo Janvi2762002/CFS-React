@@ -1,7 +1,8 @@
 import { createTheme, alpha } from "@mui/material/styles";
 
-export const SIDEBAR_WIDTH           = 264;
-export const SIDEBAR_WIDTH_COLLAPSED = 76;
+/* App navigation: the module rail, and the panel of pages beside it. */
+export const RAIL_WIDTH  = 80;
+export const PANEL_WIDTH = 256;
 
 /* Shared motion curve — used for every hover / state transition. */
 export const EASE = "cubic-bezier(0.16, 1, 0.3, 1)";
@@ -35,6 +36,12 @@ export function createAppTheme(mode = "light") {
         ? { default: "#0E1017", paper: "#171A23" }
         : { default: "#F4F6FC", paper: "#FFFFFF" },
       divider: dark ? "rgba(255,255,255,0.10)" : "rgba(16,24,40,0.10)",
+      /* Chart marks only (bars, segments, meters); text never wears these.
+         Checked for colour-blind separation and contrast on each mode's
+         paper. Cash sits under 3:1 on white, so its value is always printed. */
+      chart: dark
+        ? { bank: "#3987e5", cash: "#199e70", owe: "#d95926", track: "rgba(57,135,229,0.20)", grid: "rgba(255,255,255,0.07)" }
+        : { bank: "#2a78d6", cash: "#1baf7a", owe: "#eb6834", track: "rgba(42,120,214,0.14)", grid: "rgba(16,24,40,0.07)" },
     },
     shape: { borderRadius: 12 },
     typography: {
@@ -235,6 +242,15 @@ export function createAppTheme(mode = "light") {
         root: {
           border: "none",
           "--DataGrid-rowBorderColor": base.palette.divider,
+          /* The footer sticks to the bottom of the viewport while the page
+             scrolls past a long grid. `hidden` on the grid's root and main
+             content (and on the Paper wrapping each grid) would make them
+             scroll containers and pin the footer to them instead, so they
+             clip. Browsers without `clip` keep `hidden`: no sticky footer. */
+          overflow: "clip",
+          "& .MuiDataGrid-mainContent": { overflow: "clip" },
+          // Clears the sticky topbar when GridPager scrolls the grid into view.
+          scrollMarginTop: 72,
         },
         columnHeader: {
           backgroundColor: dark ? "rgba(255,255,255,0.05)" : "rgba(16,24,40,0.035)",
@@ -257,30 +273,19 @@ export function createAppTheme(mode = "light") {
             backgroundColor: `${alpha(base.palette.primary.main, dark ? 0.12 : 0.05)} !important`,
           },
         },
+        /* Opaque so rows don't show through while it sticks; the old faint
+           tint is layered on top of the paper colour. Above the grid's own
+           layers, including its virtual scrollbars (z-index 60-70). */
         footerContainer: {
-          backgroundColor: dark ? "rgba(255,255,255,0.02)" : "rgba(16,24,40,0.015)",
-        },
-      },
-    },
-
-    MuiTablePagination: {
-      styleOverrides: {
-        selectLabel: {
-          display: "block !important",
-          fontSize: "0.75rem",
-        },
-        input: {
-          display: "inline-flex !important",
-          marginRight: "8px !important",
-        },
-        toolbar: {
-          flexWrap: "wrap",
-          paddingLeft: "8px !important",
-          paddingRight: "8px !important",
-          minHeight: "48px",
-        },
-        spacer: {
-          display: "none !important",
+          position: "sticky",
+          // Above the phone's bottom navigation bar (set by MainLayout).
+          bottom: "var(--app-bottom-inset, 0px)",
+          zIndex: 80,
+          backgroundColor: base.palette.background.paper,
+          backgroundImage: dark
+            ? "linear-gradient(rgba(255,255,255,0.02), rgba(255,255,255,0.02))"
+            : "linear-gradient(rgba(16,24,40,0.015), rgba(16,24,40,0.015))",
+          boxShadow: dark ? "0 -6px 12px -8px rgba(0,0,0,0.7)" : "0 -6px 12px -8px rgba(16,24,40,0.2)",
         },
       },
     },

@@ -21,8 +21,8 @@ import BankTransactionService, {
 } from "../services/BankTransactionService";
 import usePagedList from "../common/usePagedList";
 import { toLocalDateTime } from "../services/payload";
-import { paginationDisplayedRows } from "../components/gridPagination";
 import { formatGridDate } from "../components/gridDate";
+import useCreateIntent from "../common/useCreateIntent";
 
 const ALL = "all";
 
@@ -146,7 +146,7 @@ export default function BankTransactions() {
     [accountId]
   );
   const filtering = search.trim() !== "" || typeFilter !== ALL;
-  const list = usePagedList({ fetchPage: fetchTxPage, fetchAll: fetchAllTx, filtering });
+  const list = usePagedList({ fetchPage: fetchTxPage, fetchAll: fetchAllTx, filtering, gridKey: "bankTransactions" });
   const loadTransactions = list.reload;
 
   useEffect(() => { loadAccounts(); }, [loadAccounts]);
@@ -381,6 +381,9 @@ export default function BankTransactions() {
       : [accountLabel(relatedOf(confirmRow)), accountLabel(accountOf(confirmRow))]
   );
 
+  // A module's "New …" button lands here with the Add dialog requested.
+  useCreateIntent(() => handleOpen());
+
   return (
     <Box className="page-enter">
       {/* ── Header ──────────────────────────────────────────────────────── */}
@@ -467,7 +470,7 @@ export default function BankTransactions() {
         <Alert severity="warning" sx={{ mb: 2 }} onClose={() => setTxNotice("")}>{txNotice}</Alert>
       )}
 
-      <Paper variant="outlined" sx={{ overflow: "hidden" }}>
+      <Paper variant="outlined" sx={{ overflow: "clip" }}>
         <Stack
           direction={{ xs: "column", sm: "row" }}
           justifyContent="space-between"
@@ -545,14 +548,12 @@ export default function BankTransactions() {
             columnVisibilityModel={{ ...columnVisibility, accountId: selected === ALL }}
             onColumnVisibilityModelChange={setColumnVisibility}
             {...list.gridProps}
-            pageSizeOptions={[5, 10, 25, 50, 100]}
             getRowId={(r) => r.id}
             disableRowSelectionOnClick
             localeText={{
               noRowsLabel: filtering
                 ? "No transactions match your filters."
                 : selectedAccount ? "No transactions for this account yet." : "No transactions recorded yet.",
-              paginationDisplayedRows: paginationDisplayedRows(list.paginationModel),
             }}
             rowHeight={56}
           />

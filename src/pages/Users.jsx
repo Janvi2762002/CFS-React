@@ -20,7 +20,7 @@ import { PASSWORD_MIN, PASSWORD_MAX, isValidPassword, isValidPhone } from "../co
 import AdminService from "../services/AdminService";
 import usePagedList from "../common/usePagedList";
 import { ROLE_OPTIONS } from "../services/AuthService";
-import { paginationDisplayedRows } from "../components/gridPagination";
+import useCreateIntent from "../common/useCreateIntent";
 
 const ROLE_COLORS = { master: "primary", admin: "success", employee: "info" };
 const ROLES = ROLE_OPTIONS.map((r) => ({ ...r, color: ROLE_COLORS[r.value] || "default" }));
@@ -61,6 +61,7 @@ export default function Users() {
     fetchPage: fetchUsersPage,
     fetchAll: fetchAllUsers,
     filtering,
+    gridKey: "users",
   });
 
   const handleOpen = (user = null) => {
@@ -187,6 +188,9 @@ export default function Users() {
   const admins     = 0;
   const employees  = 0;
 
+  // A module's "New …" button lands here with the Add dialog requested.
+  useCreateIntent(() => handleOpen());
+
   return (
     <Box className="page-enter">
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
@@ -219,7 +223,7 @@ export default function Users() {
       </Grid>
 
       {/* ── Filters & Data Table ────────────────────────────────────── */}
-      <Paper variant="outlined" sx={{ overflow: "hidden" }}>
+      <Paper variant="outlined" sx={{ overflow: "clip" }}>
         <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems={{ sm: "center" }} sx={{ p: 2 }}>
           <TextField
             value={search}
@@ -256,10 +260,8 @@ export default function Users() {
             loading={list.loading}
             disableRowSelectionOnClick
             {...list.gridProps}
-            pageSizeOptions={[5, 10, 25, 50, 100]}
             localeText={{
               noRowsLabel: "No users match the search criteria.",
-              paginationDisplayedRows: paginationDisplayedRows(list.paginationModel),
             }}
             rowHeight={56}
           />

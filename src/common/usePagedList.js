@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { DEFAULT_PAGE_SIZE } from "../services/paginate";
+import usePaginationModel from "./usePaginationModel";
+import { gridPagerProps } from "../components/GridPager";
 
 /**
  * Grid data for a paged list endpoint.
@@ -15,9 +16,10 @@ import { DEFAULT_PAGE_SIZE } from "../services/paginate";
  * @param {() => Promise<any[]>} opts.fetchAll
  * @param {boolean} opts.filtering  a search or filter is active
  * @param {boolean} [opts.keepAll]  also hold the full list while not filtering (e.g. for totals)
+ * @param {string} opts.gridKey  names the grid's remembered page size (see usePaginationModel)
  */
-export default function usePagedList({ fetchPage, fetchAll, filtering, keepAll = false }) {
-  const [paginationModel, setPaginationModel] = useState({ page: 0, pageSize: DEFAULT_PAGE_SIZE });
+export default function usePagedList({ fetchPage, fetchAll, filtering, keepAll = false, gridKey }) {
+  const [paginationModel, setPaginationModel] = usePaginationModel(gridKey);
   const [pageRows, setPageRows] = useState([]);
   const [rowCount, setRowCount] = useState(0);
   const [allRows,  setAllRows]  = useState(null);
@@ -71,7 +73,7 @@ export default function usePagedList({ fetchPage, fetchAll, filtering, keepAll =
   /* Starting or clearing a search changes which rows the pages hold. */
   useEffect(() => {
     setPaginationModel((m) => (m.page === 0 ? m : { ...m, page: 0 }));
-  }, [filtering]);
+  }, [filtering, setPaginationModel]);
 
   /** Refetch after a create, update or delete. */
   const reload = useCallback(() => setVersion((v) => v + 1), []);
@@ -82,6 +84,7 @@ export default function usePagedList({ fetchPage, fetchAll, filtering, keepAll =
     /* Props to spread onto the DataGrid. rowCount only means something in
        server mode, and the grid warns if it is passed in client mode. */
     gridProps: {
+      ...gridPagerProps,
       paginationMode: filtering ? "client" : "server",
       ...(filtering ? {} : { rowCount }),
       paginationModel,

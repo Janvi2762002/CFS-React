@@ -22,7 +22,6 @@ import { maskAccountNo } from "../components/BankAccountSlider";
 import BankAccountService from "../services/BankAccountService";
 import BankTransactionService from "../services/BankTransactionService";
 import { toLocalDateTime } from "../services/payload";
-import { paginationDisplayedRows } from "../components/gridPagination";
 import { formatGridDate } from "../components/gridDate";
 import usePagedList from "../common/usePagedList";
 
@@ -62,7 +61,7 @@ export default function BankAccounts() {
   /* The grid pages on the server; a search or status filter needs every
      account, so then the full list is paged locally. */
   const filtering = search.trim() !== "" || statusFilter !== "all";
-  const list = usePagedList({ fetchPage: fetchAccountsPage, fetchAll: fetchAllAccounts, filtering });
+  const list = usePagedList({ fetchPage: fetchAccountsPage, fetchAll: fetchAllAccounts, filtering, gridKey: "bankAccounts" });
 
   /* Balances come from their own (also paged) summary endpoint, so they load
      once per refresh rather than on every page change. They are a
@@ -284,7 +283,7 @@ export default function BankAccounts() {
         <Grid size={{ xs: 12, sm: 6, lg: 4 }}><StatTile label="Inactive" value={0} icon={BlockIcon} color="warning" /></Grid>
       </Grid>
 
-      <Paper variant="outlined" sx={{ overflow: "hidden" }}>
+      <Paper variant="outlined" sx={{ overflow: "clip" }}>
         <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems={{ sm: "center" }} sx={{ p: 2 }}>
           <TextField
             value={search}
@@ -322,10 +321,8 @@ export default function BankAccounts() {
             loading={list.loading}
             disableRowSelectionOnClick
             {...list.gridProps}
-            pageSizeOptions={[5, 10, 25, 50, 100]}
             localeText={{
               noRowsLabel: filtering ? "No accounts match your filters." : "No bank accounts yet. Add the first one above.",
-              paginationDisplayedRows: paginationDisplayedRows(list.paginationModel),
             }}
             rowHeight={56}
           />

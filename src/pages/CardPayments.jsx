@@ -14,9 +14,9 @@ import AdminService from "../services/AdminService";
 import { isConflict } from "../services/apiClient";
 import ConfirmDialog from "../components/ConfirmDialog";
 import { useAuth } from "../common/AuthContext";
-import { paginationDisplayedRows } from "../components/gridPagination";
 import { formatGridDate } from "../components/gridDate";
-import { DEFAULT_PAGE_SIZE } from "../services/paginate";
+import usePaginationModel from "../common/usePaginationModel";
+import { gridPagerProps } from "../components/GridPager";
 
 /* ── Money cell ──────────────────────────────────────────────────────────── */
 /* A null amount renders as a dash: printing ₹0 would claim a value the API
@@ -58,7 +58,7 @@ export default function CardPayments() {
 
   const [rows,            setRows]            = useState([]);
   const [rowCount,        setRowCount]        = useState(0);
-  const [paginationModel, setPaginationModel] = useState({ page: 0, pageSize: DEFAULT_PAGE_SIZE });
+  const [paginationModel, setPaginationModel] = usePaginationModel("cardPayments");
   const [search,          setSearch]          = useState("");
   const [partyFilter,     setPartyFilter]     = useState("");
   const [statusFilter,    setStatusFilter]    = useState("all");
@@ -76,7 +76,7 @@ export default function CardPayments() {
       setPaginationModel((m) => (m.page === 0 ? m : { ...m, page: 0 }));
     }, 350);
     return () => clearTimeout(t);
-  }, [search]);
+  }, [search, setPaginationModel]);
 
   /* Status is filtered by the API too, so a new one starts from page one. */
   const handleStatusFilter = (e) => {
@@ -224,7 +224,7 @@ export default function CardPayments() {
         </Button>
       </Stack>
 
-      <Paper variant="outlined" sx={{ overflow: "hidden" }}>
+      <Paper variant="outlined" sx={{ overflow: "clip" }}>
         <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems={{ sm: "center" }} sx={{ p: 2 }}>
           <TextField
             value={search} onChange={(e) => setSearch(e.target.value)}
@@ -255,11 +255,10 @@ export default function CardPayments() {
             paginationMode="server"
             paginationModel={paginationModel}
             onPaginationModelChange={setPaginationModel}
-            pageSizeOptions={[5, 10, 25, 50, 100]}
+            {...gridPagerProps}
             disableRowSelectionOnClick
             localeText={{
               noRowsLabel: "No party payment records found.",
-              paginationDisplayedRows: paginationDisplayedRows(paginationModel),
             }}
             rowHeight={56}
           />

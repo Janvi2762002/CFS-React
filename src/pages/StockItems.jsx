@@ -17,9 +17,9 @@ import StockItemService from "../services/StockItemService";
 import StockPaymentInfoService from "../services/StockPaymentInfoService";
 import { isConflict } from "../services/apiClient";
 import usePagedList from "../common/usePagedList";
-import { paginationDisplayedRows } from "../components/gridPagination";
 import { formatGridDate } from "../components/gridDate";
 import { toLocalDateTime } from "../services/payload";
+import useCreateIntent from "../common/useCreateIntent";
 
 /* Once an item's payment is completed the server refuses changes to its
    money side (409) and refuses to delete it. Descriptive fields stay open. */
@@ -49,7 +49,7 @@ export default function StockItems() {
   /* The grid pages on the server. Search and the status / IN-OUT filters
      need every item, so while any is set the full list is paged locally. */
   const filtering = search.trim() !== "" || statusFilter !== "all" || inOutFilter !== "all";
-  const list = usePagedList({ fetchPage: fetchItemsPage, fetchAll: fetchAllItems, filtering });
+  const list = usePagedList({ fetchPage: fetchItemsPage, fetchAll: fetchAllItems, filtering, gridKey: "stockItems" });
   const loadItems = list.reload;
 
   const handleOpen = (item = null) => {
@@ -200,6 +200,9 @@ export default function StockItems() {
 
   const totalAmount = filtered.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
 
+  // A module's "New …" button lands here with the Add dialog requested.
+  useCreateIntent(() => handleOpen());
+
   return (
     <Box className="page-enter">
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
@@ -225,7 +228,7 @@ export default function StockItems() {
         <Grid size={{ xs: 12, sm: 6 }}><StatTile label={filtering ? "Matching Total Amount" : "Page Total Amount"} value={`₹${totalAmount.toLocaleString()}`} icon={Inventory2Icon} color="success" /></Grid>
       </Grid>
 
-      <Paper variant="outlined" sx={{ overflow: "hidden" }}>
+      <Paper variant="outlined" sx={{ overflow: "clip" }}>
         <Stack direction={{ xs: "column", sm: "row" }} spacing={2} alignItems={{ sm: "center" }} sx={{ p: 2 }}>
           <TextField
             value={search}
@@ -262,12 +265,10 @@ export default function StockItems() {
             columns={columns}
             loading={list.loading}
             {...list.gridProps}
-            pageSizeOptions={[5, 10, 25, 50, 100]}
             getRowId={(r) => r.id}
             disableRowSelectionOnClick
             localeText={{
               noRowsLabel: "No stock items match your filters.",
-              paginationDisplayedRows: paginationDisplayedRows(list.paginationModel),
             }}
             rowHeight={56}
           />
