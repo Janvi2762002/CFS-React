@@ -1,11 +1,6 @@
 import apiClient, { unwrap } from "./apiClient";
-import { toArray } from "./paginate";
+import { listParams, normaliseList } from "./paginate";
 import { toApiDate, toApiNumber, toApiText } from "./payload";
-
-/* Newest first; entries on the same day fall back to the later id first. */
-const byNewest = (a, b) =>
-  (Date.parse(b.transactionDate) || 0) - (Date.parse(a.transactionDate) || 0) ||
-  (Number(b.id) || 0) - (Number(a.id) || 0);
 
 /** Shape an entry to the CashLedger contract (type is OPENING, IN or OUT). */
 function toApiEntry(entry) {
@@ -21,22 +16,15 @@ function toApiEntry(entry) {
 }
 
 class CashLedgerService {
-  /** Fetch all entries as a plain array (backward-compatible). */
-  async getEntries() {
-    const response = await apiClient.get("/CashLedger");
-    return unwrap(response) || [];
-  }
-
   /**
-   * Every entry, newest first.
-   *
-   * Unlike the other list endpoints, /CashLedger accepts no paging
-   * parameters and returns the full collection, so callers page it locally
-   * rather than asking again for each page.
+   * One page of entries, newest first unless sorted otherwise.
+   * Returns { data, total, ... }. `search` matches name and remarks.
+   * @param {{ page?: number, pageSize?: number, search?: string, transactionType?: string, sortBy?: string, sortDir?: string }} params  — 1-indexed page
    */
-  async getEntriesNewestFirst() {
-    const raw = unwrap(await apiClient.get("/CashLedger"));
-    return Array.isArray(raw) ? [...raw].sort(byNewest) : toArray(raw);
+  async getEntriesPaginated(opts = {}) {
+    const { page = 1, pageSize = 25 } = opts;
+    const raw = unwrap(await apiClient.get("/CashLedger", { params: listParams(opts) }));
+    return normaliseList(raw, page, pageSize);
   }
 
   async getEntry(id) {

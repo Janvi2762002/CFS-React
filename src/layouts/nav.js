@@ -16,8 +16,9 @@ const has = (v) => v !== undefined && v !== null;
    and its pages. The Topbar reads page titles from here too, so a route
    added here gets its title for free.
 
-   `roles` decides who sees a module or page at all. `masterOnly` pages stay
-   visible to everyone but locked, so the feature remains discoverable. */
+   `roles` decides who sees a module or page at all. `needsDashboard` pages
+   stay visible to everyone but locked for roles that can't read the
+   dashboard, so the feature remains discoverable. */
 export const MODULES = [
   {
     id: "home", label: "Home", name: "Overview", icon: DashboardIcon,
@@ -26,7 +27,7 @@ export const MODULES = [
       ? { label: "Total capital", value: inr((s.totalBankBalance || 0) + (s.totalAvailableCash || 0)), sub: "Bank and cash together" }
       : null,
     pages: [
-      { label: "Dashboard", path: "/dashboard", sub: "Real-time operational overview", masterOnly: true },
+      { label: "Dashboard", path: "/dashboard", sub: "Real-time operational overview", needsDashboard: true },
     ],
   },
   {
@@ -95,6 +96,9 @@ export const MODULES = [
     ],
   },
 ];
+
+/** The API serves /Dashboard/* to Admin and Master only. */
+export const canReadDashboard = (role) => role === "master" || role === "admin";
 
 /** Modules the role can see. */
 export const modulesFor = (role) => MODULES.filter((m) => m.roles.includes(role));

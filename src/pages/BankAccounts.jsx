@@ -23,7 +23,8 @@ import BankAccountService from "../services/BankAccountService";
 import BankTransactionService from "../services/BankTransactionService";
 import { toLocalDateTime } from "../services/payload";
 import { formatGridDate } from "../components/gridDate";
-import usePagedList from "../common/usePagedList";
+import usePagedList, { serverSortable } from "../common/usePagedList";
+import useDebouncedValue from "../common/useDebouncedValue";
 
 const inr = (n) =>
   `₹${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
@@ -38,9 +39,18 @@ const emptyForm = () => ({
 /* Spaces and case are ignored when comparing account numbers. */
 const normalNo = (v) => String(v || "").replace(/\s+/g, "").toLowerCase();
 
-/* Stable references, so the paging hook does not refetch on every render. */
+/* A stable reference, so the paging hook does not refetch on every render. */
 const fetchAccountsPage = (p) => BankAccountService.getAccountsPaginated(p);
-const fetchAllAccounts = () => BankAccountService.getAccounts();
+
+/* Grid columns the API can sort by (column field → sortBy). The balance
+   comes from a separate summary, so it can't be sorted on the server. */
+const SORT_FIELDS = {
+  bankName: "bankName", accountName: "accountName", accountNo: "accountNo",
+  isActive: "isActive", createdAt: "createdAt",
+};
+
+/* Status filter → the API's isActive. */
+const IS_ACTIVE = { active: true, inactive: false };
 
 export default function BankAccounts() {
   const theme = useTheme();
@@ -58,10 +68,18 @@ export default function BankAccounts() {
   const [confirm,         setConfirm]         = useState({ open: false, account: null });
   const isMobile = useMediaQuery("(max-width:768px)");
 
-  /* The grid pages on the server; a search or status filter needs every
-     account, so then the full list is paged locally. */
-  const filtering = search.trim() !== "" || statusFilter !== "all";
-  const list = usePagedList({ fetchPage: fetchAccountsPage, fetchAll: fetchAllAccounts, filtering, gridKey: "bankAccounts" });
+  /* Search, status and sorting are all done by the API, page by page. */
+  const debouncedSearch = useDebouncedValue(search);
+  const filtering = debouncedSearch.trim() !== "" || statusFilter !== "all";
+  const list = usePagedList({
+    fetchPage: fetchAccountsPage,
+    filters: { search: debouncedSearch, isActive: IS_ACTIVE[statusFilter] },
+    sortFields: SORT_FIELDS,
+    gridKey: "bankAccounts",
+  });
+
+  /* Tile counts from GET /BankAccount/summary/status. */
+  const [counts, setCounts] = useState(null);
 
   /* Balances come from their own (also paged) summary endpoint, so they load
      once per refresh rather than on every page change. They are a
@@ -72,6 +90,9 @@ export default function BankAccounts() {
     BankAccountService.getBalanceSummaries()
       .then((rows) => { if (live) setBalances(new Map(rows.map((r) => [r.accountId, r.currentBalance]))); })
       .catch(() => { if (live) setBalances(new Map()); });
+    BankAccountService.getStatusSummary()
+      .then((c) => { if (live) setCounts(c); })
+      .catch(() => { if (live) setCounts(null); });
     return () => { live = false; };
   }, [balancesVersion]);
 
@@ -178,22 +199,10 @@ export default function BankAccounts() {
     }
   };
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return accounts.filter((a) => {
-      const matchesStatus =
-        statusFilter === "all" ? true : statusFilter === "active" ? a.isActive : !a.isActive;
-      if (!matchesStatus) return false;
-      if (!q) return true;
-      return [a.bankName, a.accountName, a.accountNo].some((v) => String(v || "").toLowerCase().includes(q));
-    });
-  }, [accounts, search, statusFilter]);
+  /* A dash if the counts failed to load. */
+  const totalAccounts = counts?.total ?? "—";
 
-  /* No extra request for the tiles: the total is the count the paged reply
-     already carries, and the API reports no active / inactive counts. */
-  const totalAccounts = list.rowCount || 0;
-
-  const columns = [
+  const columns = serverSortable([
     {
       field: "bankName", headerName: "Bank", flex: 1, minWidth: 180,
       renderCell: (p) => (
@@ -247,7 +256,7 @@ export default function BankAccounts() {
         </Stack>
       ),
     },
-  ];
+  ], SORT_FIELDS);
 
   const confirmName = confirm.account
     ? [confirm.account.bankName, confirm.account.accountName].filter(Boolean).join(" · ")
@@ -279,8 +288,8 @@ export default function BankAccounts() {
 
       <Grid container spacing={2} className="stagger" sx={{ mb: 3 }}>
         <Grid size={{ xs: 12, sm: 6, lg: 4 }}><StatTile label="Bank Accounts" value={totalAccounts} icon={AccountBalanceIcon} color="primary" /></Grid>
-        <Grid size={{ xs: 12, sm: 6, lg: 4 }}><StatTile label="Active" value={0} icon={CheckCircleIcon} color="success" /></Grid>
-        <Grid size={{ xs: 12, sm: 6, lg: 4 }}><StatTile label="Inactive" value={0} icon={BlockIcon} color="warning" /></Grid>
+        <Grid size={{ xs: 12, sm: 6, lg: 4 }}><StatTile label="Active" value={counts?.active ?? "—"} icon={CheckCircleIcon} color="success" /></Grid>
+        <Grid size={{ xs: 12, sm: 6, lg: 4 }}><StatTile label="Inactive" value={counts?.inactive ?? "—"} icon={BlockIcon} color="warning" /></Grid>
       </Grid>
 
       <Paper variant="outlined" sx={{ overflow: "clip" }}>
@@ -315,7 +324,7 @@ export default function BankAccounts() {
             scrolls instead of the grid clipping rows inside a fixed box. */}
         <Box sx={{ display: "flex", flexDirection: "column" }}>
           <DataGrid
-            rows={filtered}
+            rows={accounts}
             columns={columns}
             getRowId={(r) => r.id}
             loading={list.loading}

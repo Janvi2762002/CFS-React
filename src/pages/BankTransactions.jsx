@@ -19,16 +19,21 @@ import AmountField from "../components/AmountField";
 import BankTransactionService, {
   TRANSACTION_TYPES, ENTRY_TYPES, directionOf, isTransfer,
 } from "../services/BankTransactionService";
-import usePagedList from "../common/usePagedList";
+import usePagedList, { serverSortable } from "../common/usePagedList";
+import useDebouncedValue from "../common/useDebouncedValue";
 import { toLocalDateTime } from "../services/payload";
 import { formatGridDate } from "../components/gridDate";
 import useCreateIntent from "../common/useCreateIntent";
 
 const ALL = "all";
 
-/* Sorting is in the browser, so while paging on the server this orders the
-   page on screen; during a search it orders every match. */
-const NEWEST_FIRST = { sorting: { sortModel: [{ field: "transactionDate", sort: "desc" }] } };
+/* Grid columns the API can sort by (column field → sortBy). Debit and
+   Credit are two views of one amount, so they aren't sortable on their own. */
+const SORT_FIELDS = {
+  transactionDate: "transactionDate", accountId: "bankName", transactionType: "transactionType",
+  remarks: "remarks", referenceNo: "referenceNo",
+};
+const NEWEST_FIRST = [{ field: "transactionDate", sort: "desc" }];
 
 const TYPE_META = {
   OPENING:      { color: "default" },
@@ -39,11 +44,14 @@ const TYPE_META = {
 };
 const TYPE_LABEL = Object.fromEntries(TRANSACTION_TYPES.map((t) => [t.value, t.label]));
 
-/* The filter offers the same three choices as the form. An opening balance
-   is money coming into the account, so it lists under "Money in". */
-const matchesTypeFilter = (type, filter) =>
-  filter === ALL ||
-  (filter === "TRANSFER" ? isTransfer(type) : filter === "IN" ? type === "IN" || type === "OPENING" : type === filter);
+/* The filter offers the same three choices as the form, each sent to the
+   API as the stored types it covers. An opening balance is money coming
+   into the account, so it lists under "Money in". */
+const TYPE_FILTER_TYPES = {
+  IN:       ["IN", "OPENING"],
+  OUT:      ["OUT"],
+  TRANSFER: ["TRANSFER_IN", "TRANSFER_OUT"],
+};
 
 const inr = (n) =>
   `₹${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
@@ -139,14 +147,16 @@ export default function BankTransactions() {
     (p) => BankTransactionService.getTransactionsPaginated({ ...p, accountId }),
     [accountId]
   );
-  const fetchAllTx = useCallback(
-    () => (accountId == null
-      ? BankTransactionService.getTransactions()
-      : BankTransactionService.getByAccount(accountId)),
-    [accountId]
-  );
-  const filtering = search.trim() !== "" || typeFilter !== ALL;
-  const list = usePagedList({ fetchPage: fetchTxPage, fetchAll: fetchAllTx, filtering, gridKey: "bankTransactions" });
+  /* Search, type and sorting are all done by the API, page by page. */
+  const debouncedSearch = useDebouncedValue(search);
+  const filtering = debouncedSearch.trim() !== "" || typeFilter !== ALL;
+  const list = usePagedList({
+    fetchPage: fetchTxPage,
+    filters: { search: debouncedSearch, transactionType: TYPE_FILTER_TYPES[typeFilter] },
+    sortFields: SORT_FIELDS,
+    initialSort: NEWEST_FIRST,
+    gridKey: "bankTransactions",
+  });
   const loadTransactions = list.reload;
 
   useEffect(() => { loadAccounts(); }, [loadAccounts]);
@@ -280,17 +290,7 @@ export default function BankTransactions() {
 
   /* ── Grid ───────────────────────────────────────────────────────────── */
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return list.rows.filter((r) => {
-      if (!matchesTypeFilter(String(r.transactionType).toUpperCase(), typeFilter)) return false;
-      if (!q) return true;
-      return [r.remarks, r.referenceNo, accountLabel(accountOf(r)), accountLabel(relatedOf(r))]
-        .some((v) => String(v || "").toLowerCase().includes(q));
-    });
-  }, [list.rows, search, typeFilter, accountOf, relatedOf]);
-
-  const columns = [
+  const columns = serverSortable([
     { field: "transactionDate", headerName: "Date", width: 108, valueFormatter: (v) => formatGridDate(v) },
     {
       field: "accountId", headerName: "Account", flex: 1, minWidth: 110,
@@ -368,7 +368,7 @@ export default function BankTransactions() {
         </Stack>
       ),
     },
-  ];
+  ], SORT_FIELDS);
 
   const selectedAccount = selected === ALL ? null : accountsById.get(selected);
 
@@ -541,10 +541,9 @@ export default function BankTransactions() {
             scrolls instead of the grid clipping rows inside a fixed box. */}
         <Box sx={{ display: "flex", flexDirection: "column" }}>
           <DataGrid
-            rows={filtered}
+            rows={list.rows}
             columns={columns}
             loading={list.loading}
-            initialState={NEWEST_FIRST}
             columnVisibilityModel={{ ...columnVisibility, accountId: selected === ALL }}
             onColumnVisibilityModelChange={setColumnVisibility}
             {...list.gridProps}

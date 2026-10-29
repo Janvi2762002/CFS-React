@@ -17,6 +17,7 @@ import StockPayments from "./pages/StockPayments";
 import CashLedger from "./pages/CashLedger";
 import BankTransactions from "./pages/BankTransactions";
 import BankAccounts from "./pages/BankAccounts";
+import { canReadDashboard } from "./layouts/nav";
 
 function UnauthenticatedPrompt() {
   const navigate = useNavigate();
@@ -63,11 +64,11 @@ function AppRoutes() {
   }
 
   const isLoggedIn = userRole === "admin" || userRole === "employee" || userRole === "master";
-  const isMaster   = userRole === "master";
+  const seesDashboard = canReadDashboard(userRole);
 
-  /* Only the Master sees the analytics dashboard; everyone else starts on
-     the swipe register. Used for post-login and catch-all redirects. */
-  const landingPath = isMaster ? "/dashboard" : "/swipes";
+  /* Admin and Master start on the dashboard; employees, who can't read it,
+     start on the swipe register. Used for post-login and catch-all redirects. */
+  const landingPath = seesDashboard ? "/dashboard" : "/swipes";
 
   return (
     <Routes>
@@ -83,10 +84,10 @@ function AppRoutes() {
 
       {isLoggedIn ? (
         <Route element={<MainLayout role={userRole} onLogout={handleLogout} />}>
-          {/* Visible to every role; only the Master sees the real thing. */}
+          {/* Visible to every role; Admin and Master see the real thing. */}
           <Route
             path="/dashboard"
-            element={isMaster ? <Dashboard /> : <Restricted page="The analytics dashboard" />}
+            element={seesDashboard ? <Dashboard /> : <Restricted page="The analytics dashboard" requiredRole="Admin or Master" />}
           />
 
           {/* Card Management pages */}

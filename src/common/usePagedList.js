@@ -3,101 +3,108 @@ import usePaginationModel from "./usePaginationModel";
 import { gridPagerProps } from "../components/GridPager";
 
 /**
- * Grid data for a paged list endpoint.
+ * Grid data for a paged list endpoint, with search, filters and sorting all
+ * done by the server. Every page, page-size, filter or sort change asks the
+ * API for exactly that window; a new filter or sort starts from page one.
  *
- * Normally the grid pages on the server: every page or page-size change asks
- * the API for exactly that window (`fetchPage`). The endpoints take no search
- * or filter parameters, though, so while `filtering` is true the full list is
- * loaded once (`fetchAll`) and the grid pages it locally, which keeps a search
- * covering every record instead of only the page on screen.
+ * Sorting: `sortFields` maps a grid column's `field` to the API's `sortBy`
+ * name. Columns missing from it can't be sorted on the server, so mark them
+ * with `serverSortable(columns, sortFields)`.
  *
  * @param {object} opts
- * @param {(p: { page: number, pageSize: number }) => Promise<{ data: any[], total: number }>} opts.fetchPage  1-indexed page
- * @param {() => Promise<any[]>} opts.fetchAll
- * @param {boolean} opts.filtering  a search or filter is active
- * @param {boolean} [opts.keepAll]  also hold the full list while not filtering (e.g. for totals)
+ * @param {(p: object) => Promise<{ data: any[], total: number }>} opts.fetchPage
+ *   receives { page (1-indexed), pageSize, ...filters, sortBy?, sortDir? }; keep it stable
+ * @param {object} [opts.filters]  the API's filter params; empty values mean "no filter"
+ * @param {Record<string, string>} [opts.sortFields]  grid field → API sortBy
+ * @param {{ field: string, sort: "asc" | "desc" }[]} [opts.initialSort]
  * @param {string} opts.gridKey  names the grid's remembered page size (see usePaginationModel)
  */
-export default function usePagedList({ fetchPage, fetchAll, filtering, keepAll = false, gridKey }) {
+export default function usePagedList({ fetchPage, filters = {}, sortFields = {}, initialSort = [], gridKey }) {
   const [paginationModel, setPaginationModel] = usePaginationModel(gridKey);
-  const [pageRows, setPageRows] = useState([]);
+  const [sortModel, setSortModel] = useState(initialSort);
+  const [rows,     setRows]     = useState([]);
   const [rowCount, setRowCount] = useState(0);
-  const [allRows,  setAllRows]  = useState(null);
-  const [pageLoading, setPageLoading] = useState(true);
-  const [allLoading,  setAllLoading]  = useState(false);
-  const [pageError,   setPageError]   = useState("");
-  const [allError,    setAllError]    = useState("");
+  const [loading,  setLoading]  = useState(true);
+  const [error,    setError]    = useState("");
   const [version,  setVersion]  = useState(0); // bumped by reload()
-  const pageRequest = useRef(0);
-  const allRequest = useRef(0);
+  const request = useRef(0);
 
-  const needAll = filtering || keepAll;
+  /* Filters arrive as a fresh object each render; compare them by value. */
+  const filtersKey = JSON.stringify(filters);
+  const sort = sortModel[0];
+  const sortBy = sort ? sortFields[sort.field] : undefined;
+  const sortDir = sortBy ? sort.sort : undefined;
+  const queryKey = `${filtersKey}|${sortBy || ""}|${sortDir || ""}`;
+  const lastQuery = useRef(queryKey);
 
-  /* Server window. A slower reply to an older page must not overwrite a newer one. */
   useEffect(() => {
-    const request = ++pageRequest.current;
-    if (filtering) { setPageLoading(false); return; }
-    setPageLoading(true);
-    setPageError("");
-    fetchPage({ page: paginationModel.page + 1, pageSize: paginationModel.pageSize })
+    /* A new filter or sort starts from the first page. Moving there re-runs
+       this effect, so the old page is never fetched with the new filters. */
+    if (lastQuery.current !== queryKey) {
+      lastQuery.current = queryKey;
+      if (paginationModel.page !== 0) {
+        setPaginationModel((m) => ({ ...m, page: 0 }));
+        return;
+      }
+    }
+
+    // A slower reply to an older request must not overwrite a newer one.
+    const id = ++request.current;
+    setLoading(true);
+    setError("");
+    fetchPage({
+      page: paginationModel.page + 1,
+      pageSize: paginationModel.pageSize,
+      ...JSON.parse(filtersKey),
+      ...(sortBy ? { sortBy, sortDir } : {}),
+    })
       .then(({ data, total }) => {
-        if (request !== pageRequest.current) return;
-        setPageRows(Array.isArray(data) ? data : []);
+        if (id !== request.current) return;
+        setRows(Array.isArray(data) ? data : []);
         setRowCount(total || 0);
       })
       .catch((e) => {
-        if (request !== pageRequest.current) return;
-        setPageRows([]);
+        if (id !== request.current) return;
+        setRows([]);
         setRowCount(0);
-        setPageError(e?.message || "Could not load the list.");
+        setError(e?.message || "Could not load the list.");
       })
-      .finally(() => { if (request === pageRequest.current) setPageLoading(false); });
-  }, [fetchPage, filtering, paginationModel.page, paginationModel.pageSize, version]);
-
-  /* Full list, fetched once per reload and only when something needs it. */
-  useEffect(() => {
-    const request = ++allRequest.current;
-    if (!needAll) { setAllLoading(false); return; }
-    setAllLoading(true);
-    setAllError("");
-    fetchAll()
-      .then((rows) => { if (request === allRequest.current) setAllRows(Array.isArray(rows) ? rows : []); })
-      .catch((e) => {
-        if (request !== allRequest.current) return;
-        setAllRows([]);
-        setAllError(e?.message || "Could not load the list.");
-      })
-      .finally(() => { if (request === allRequest.current) setAllLoading(false); });
-  }, [fetchAll, needAll, version]);
-
-  /* Starting or clearing a search changes which rows the pages hold. */
-  useEffect(() => {
-    setPaginationModel((m) => (m.page === 0 ? m : { ...m, page: 0 }));
-  }, [filtering, setPaginationModel]);
+      .finally(() => { if (id === request.current) setLoading(false); });
+    // queryKey stands in for filtersKey, sortBy and sortDir.
+  }, [fetchPage, queryKey, paginationModel.page, paginationModel.pageSize, version]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Refetch after a create, update or delete. */
   const reload = useCallback(() => setVersion((v) => v + 1), []);
 
   return {
-    rows: filtering ? allRows ?? [] : pageRows,
-    allRows,
-    /* Props to spread onto the DataGrid. rowCount only means something in
-       server mode, and the grid warns if it is passed in client mode. */
+    rows,
+    rowCount,
+    /* Props to spread onto the DataGrid. The grid's own column filters
+       would only filter the page on screen, so they stay off: the page's
+       toolbar filters go to the server instead. */
     gridProps: {
       ...gridPagerProps,
-      paginationMode: filtering ? "client" : "server",
-      ...(filtering ? {} : { rowCount }),
+      paginationMode: "server",
+      sortingMode: "server",
+      rowCount,
       paginationModel,
       onPaginationModelChange: setPaginationModel,
+      sortModel,
+      onSortModelChange: setSortModel,
+      disableColumnFilter: true,
     },
-    /** Server-reported total while paging on the server. */
-    rowCount,
     paginationModel,
     setPaginationModel,
-    loading: filtering ? allLoading : pageLoading,
-    error: filtering ? allError : pageError,
-    /** Error from the full list while it is only held for totals. */
-    allError,
+    loading,
+    error,
     reload,
   };
+}
+
+/**
+ * Marks every column the API can't sort by as not sortable, so its header
+ * offers no sort that would only reorder the page on screen.
+ */
+export function serverSortable(columns, sortFields) {
+  return columns.map((c) => (c.field in sortFields ? c : { ...c, sortable: false }));
 }

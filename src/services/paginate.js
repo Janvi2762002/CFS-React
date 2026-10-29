@@ -34,6 +34,25 @@ export function pageParams({ page = 1, pageSize = DEFAULT_PAGE_SIZE } = {}) {
 }
 
 /**
+ * Query string for a page plus its filters and sort.
+ *
+ * Filters left empty, unset or "all" are dropped, so they mean "no filter";
+ * text is trimmed and a list becomes the comma-separated form the API reads
+ * (`transactionType=IN,OPENING`).
+ *
+ * @param {{ page?: number, pageSize?: number, [filter: string]: any }} opts
+ */
+export function listParams({ page = 1, pageSize = DEFAULT_PAGE_SIZE, ...filters } = {}) {
+  const params = pageParams({ page, pageSize });
+  for (const [key, raw] of Object.entries(filters)) {
+    const value = Array.isArray(raw) ? raw.join(",") : typeof raw === "string" ? raw.trim() : raw;
+    if (value === undefined || value === null || value === "" || value === "all") continue;
+    params[key] = value;
+  }
+  return params;
+}
+
+/**
  * Normalise a list response to { data, total, page, totalPages, next, previous }.
  *
  * Handles both server-paged endpoints and the ones that still return a bare

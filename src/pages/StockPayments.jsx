@@ -405,6 +405,10 @@ export default function StockPayments() {
               rowCount={rowCount}
               loading={loading}
               paginationMode="server"
+            /* The API can't sort these lists, and the grid's own sort and
+               column filter would only reorder or filter the page on screen. */
+            disableColumnSorting
+            disableColumnFilter
               paginationModel={paginationModel}
               onPaginationModelChange={setPaginationModel}
               {...gridPagerProps}
@@ -423,6 +427,10 @@ export default function StockPayments() {
               rowCount={partyCount}
               loading={partiesLoading}
               paginationMode="server"
+            /* The API can't sort these lists, and the grid's own sort and
+               column filter would only reorder or filter the page on screen. */
+            disableColumnSorting
+            disableColumnFilter
               paginationModel={partyPagination}
               onPaginationModelChange={setPartyPagination}
               {...gridPagerProps}

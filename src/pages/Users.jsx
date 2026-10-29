@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   Box, Button, Dialog, DialogActions, DialogContent, DialogTitle,
   TextField, Typography, IconButton, useMediaQuery, MenuItem,
@@ -18,7 +18,8 @@ import StatTile from "../components/StatTile";
 import ConfirmDialog from "../components/ConfirmDialog";
 import { PASSWORD_MIN, PASSWORD_MAX, isValidPassword, isValidPhone } from "../common/userValidation";
 import AdminService from "../services/AdminService";
-import usePagedList from "../common/usePagedList";
+import usePagedList, { serverSortable } from "../common/usePagedList";
+import useDebouncedValue from "../common/useDebouncedValue";
 import { ROLE_OPTIONS } from "../services/AuthService";
 import useCreateIntent from "../common/useCreateIntent";
 
@@ -37,9 +38,13 @@ function RoleChip({ role }) {
   );
 }
 
-/* Stable references, so the paging hook does not refetch on every render. */
+/* A stable reference, so the paging hook does not refetch on every render. */
 const fetchUsersPage = (p) => AdminService.getUsersPaginated(p);
-const fetchAllUsers = () => AdminService.getUsers();
+
+/* Grid columns the API can sort by (column field → sortBy). */
+const SORT_FIELDS = {
+  fullName: "fullName", nickName: "nickName", phoneNumber: "phoneNumber", role: "role",
+};
 
 export default function Users() {
   const [open,       setOpen]       = useState(false);
@@ -55,14 +60,26 @@ export default function Users() {
   const [confirm, setConfirm] = useState({ open: false, id: null });
   const isMobile = useMediaQuery("(max-width:768px)");
 
-  /* The grid pages on the server; a search or role filter needs every user. */
-  const filtering = search.trim() !== "" || roleFilter !== "all";
+  /* Search, role and sorting are all done by the API, page by page. */
+  const debouncedSearch = useDebouncedValue(search);
   const list = usePagedList({
     fetchPage: fetchUsersPage,
-    fetchAll: fetchAllUsers,
-    filtering,
+    filters: { search: debouncedSearch, role: roleFilter },
+    sortFields: SORT_FIELDS,
     gridKey: "users",
   });
+
+  /* Tile counts from GET /Users/summary; they change with every add or delete. */
+  const [summary, setSummary] = useState(null);
+  const loadSummary = useCallback(() => {
+    AdminService.getUsersSummary().then(setSummary).catch(() => setSummary(null));
+  }, []);
+  useEffect(() => { loadSummary(); }, [loadSummary]);
+
+  const reloadAll = () => {
+    list.reload();
+    loadSummary();
+  };
 
   const handleOpen = (user = null) => {
     if (user) {
@@ -109,7 +126,7 @@ export default function Users() {
     try {
       await AdminService.saveUser(formData);
       setOpen(false);
-      list.reload();
+      reloadAll();
     } catch (e) {
       setError(e?.message || "Could not create the user.");
     } finally { setSaving(false); }
@@ -120,7 +137,7 @@ export default function Users() {
     try {
       await AdminService.updateUser(formData.id, formData);
       setOpen(false);
-      list.reload();
+      reloadAll();
     } catch (e) {
       setError(e?.message || "Could not update the user.");
     } finally { setSaving(false); }
@@ -131,24 +148,13 @@ export default function Users() {
     setError("");
     try {
       await AdminService.deleteUser(id);
-      list.reload();
+      reloadAll();
     } catch (e) {
       setError(e?.message || "Could not delete the user.");
     }
   };
 
-  const filtered = useMemo(() =>
-    list.rows.filter((u) => {
-      const q = search.toLowerCase();
-      const matchesSearch =
-        (u.fullName || "").toLowerCase().includes(q) ||
-        (u.username || "").toLowerCase().includes(q) ||
-        (u.role || "").toLowerCase().includes(q);
-      const matchesRole = roleFilter === "all" ? true : u.role === roleFilter;
-      return matchesSearch && matchesRole;
-    }), [list.rows, search, roleFilter]);
-
-  const columns = [
+  const columns = serverSortable([
     {
       field: "fullName", headerName: "User Name", flex: 1.2, minWidth: 170,
       renderCell: (p) => (
@@ -180,13 +186,12 @@ export default function Users() {
         </Stack>
       ),
     },
-  ];
+  ], SORT_FIELDS);
 
-  /* No extra request for the tiles: the total is the count the paged reply
-     already carries, and the API reports no per-role counts, so those show 0. */
-  const totalUsers = list.rowCount || 0;
-  const admins     = 0;
-  const employees  = 0;
+  /* The API's "User" role is shown as Employee. A dash if the counts failed to load. */
+  const totalUsers = summary?.total ?? "—";
+  const admins     = summary?.admins ?? "—";
+  const employees  = summary?.users ?? "—";
 
   // A module's "New …" button lands here with the Add dialog requested.
   useCreateIntent(() => handleOpen());
@@ -228,7 +233,7 @@ export default function Users() {
           <TextField
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name, username or role"
+            placeholder="Search by name, username or nickname"
             sx={{ minWidth: { sm: 280 }, flexGrow: 1 }}
             InputProps={{
               startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>,
@@ -254,7 +259,7 @@ export default function Users() {
             scrolls instead of the grid clipping rows inside a fixed box. */}
         <Box sx={{ display: "flex", flexDirection: "column" }}>
           <DataGrid
-            rows={filtered}
+            rows={list.rows}
             columns={columns}
             getRowId={(r) => r.id}
             loading={list.loading}

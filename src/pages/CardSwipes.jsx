@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from "react";
+import React, { useState, useRef } from "react";
 import { DataGrid } from "@mui/x-data-grid";
 import {
   Typography, Box, TextField, Button, IconButton,
@@ -16,32 +16,37 @@ import * as XLSX from "xlsx";
 import { saveAs } from "file-saver";
 import AdminService from "../services/AdminService";
 import { isConflict } from "../services/apiClient";
-import usePagedList from "../common/usePagedList";
+import usePagedList, { serverSortable } from "../common/usePagedList";
+import useDebouncedValue from "../common/useDebouncedValue";
 import ConfirmDialog from "../components/ConfirmDialog";
 import { useAuth } from "../common/AuthContext";
 import { formatGridDate } from "../components/gridDate";
 import { toLocalDateTime } from "../services/payload";
 import useCreateIntent from "../common/useCreateIntent";
 
-/* Sorting is in the browser, so while paging on the server this orders the
-   page on screen; during a search it orders every match. */
-const NEWEST_FIRST = { sorting: { sortModel: [{ field: "date", sort: "desc" }] } };
-
+/* Each choice is one API filter: payment state (isSettled) or card limit (limitUsed). */
 const STATUS_FILTERS = [
   { id: "all",       label: "All swipes" },
-  { id: "unsettled", label: "Unsettled" },
-  { id: "settled",   label: "Settled" },
-  { id: "used",      label: "Card limit used" },
-  { id: "notUsed",   label: "Card limit not used" },
+  { id: "unsettled", label: "Unsettled",           params: { isSettled: false } },
+  { id: "settled",   label: "Settled",             params: { isSettled: true } },
+  { id: "used",      label: "Card limit used",     params: { limitUsed: true } },
+  { id: "notUsed",   label: "Card limit not used", params: { limitUsed: false } },
 ];
+
+/* Grid columns the API can sort by (column field → sortBy). */
+const SORT_FIELDS = {
+  date: "date", partyName: "partyName", cardName: "cardName", bankName: "bankName",
+  deduction: "deduction", profit: "profit", merchant: "merchant", swipePerson: "swipePerson",
+  model: "model", pos: "pos", isSettled: "isSettled", limitUsed: "limitUsed",
+};
+const NEWEST_FIRST = [{ field: "date", sort: "desc" }];
 
 /* A settled swipe has been paid out to its party; the server refuses to
    change or delete it (409). */
 const SETTLED_MESSAGE = "This swipe is settled, so it can't be changed or deleted.";
 
-/* Stable references, so the paging hook does not refetch on every render. */
+/* A stable reference, so the paging hook does not refetch on every render. */
 const fetchSwipesPage = (p) => AdminService.getCardInfoPaginated(p);
-const fetchAllSwipes = () => AdminService.getCardInfo();
 
 export default function CardSwipes() {
   const { userRole } = useAuth();
@@ -59,10 +64,15 @@ export default function CardSwipes() {
   const fileInputRef = useRef();
   const isMobile = useMediaQuery("(max-width:768px)");
 
-  /* The grid pages on the server; the API has no search parameters, so a
-     search or status filter loads the whole register and pages it locally. */
-  const filtering = search.trim() !== "" || filterStatus !== "all";
-  const list = usePagedList({ fetchPage: fetchSwipesPage, fetchAll: fetchAllSwipes, filtering, gridKey: "cardSwipes" });
+  /* Search, status and sorting are all done by the API, page by page. */
+  const debouncedSearch = useDebouncedValue(search);
+  const filters = {
+    search: debouncedSearch,
+    ...STATUS_FILTERS.find((f) => f.id === filterStatus)?.params,
+  };
+  const list = usePagedList({
+    fetchPage: fetchSwipesPage, filters, sortFields: SORT_FIELDS, initialSort: NEWEST_FIRST, gridKey: "cardSwipes",
+  });
   const fetchData = list.reload;
 
   const handleOpen = (row = null) => {
@@ -127,29 +137,13 @@ export default function CardSwipes() {
 
   const fmt = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
 
-  const filteredRows = useMemo(() => {
-    return list.rows.filter((r) => {
-      const matchesSearch =
-        (r.partyName || "").toLowerCase().includes(search.toLowerCase()) ||
-        (r.cardNumber || "").toString().includes(search) ||
-        (r.bankName || "").toLowerCase().includes(search.toLowerCase());
-      const matchesFilter =
-        filterStatus === "all" ? true :
-        filterStatus === "settled" ? Boolean(r.isSettled) :
-        filterStatus === "unsettled" ? !r.isSettled :
-        filterStatus === "used" ? Boolean(r.limitUsed) :
-        filterStatus === "notUsed" ? !r.limitUsed : true;
-      return matchesSearch && matchesFilter;
-    });
-  }, [list.rows, search, filterStatus]);
-
-  /* The export covers every matching record, not just the page on screen. */
+  /* The export covers every record matching the filters, not just the page on screen. */
   const handleExport = async () => {
     setExporting(true);
     setError("");
     let all;
     try {
-      all = filtering ? filteredRows : await AdminService.getCardInfo();
+      all = await AdminService.getCardInfo(filters);
     } catch (e) {
       setError(e?.message || "Could not load card swipes for export.");
       return;
@@ -185,7 +179,7 @@ export default function CardSwipes() {
     reader.readAsArrayBuffer(file);
   };
 
-  const columns = [
+  const columns = serverSortable([
     { field: "date",      headerName: "Date",       width: 120, valueFormatter: (v) => formatGridDate(v) },
     { field: "partyName", headerName: "Party Name", flex: 1.2, minWidth: 150,
       renderCell: (p) => p.value || "—" },
@@ -270,7 +264,7 @@ export default function CardSwipes() {
         );
       },
     }] : []),
-  ];
+  ], SORT_FIELDS);
 
   // A module's "New …" button lands here with the Add dialog requested.
   useCreateIntent(() => handleOpen());
@@ -332,9 +326,8 @@ export default function CardSwipes() {
             scrolls instead of the grid clipping rows inside a fixed box. */}
         <Box sx={{ display: "flex", flexDirection: "column" }}>
           <DataGrid
-            rows={filteredRows}
+            rows={list.rows}
             columns={columns}
-            initialState={NEWEST_FIRST}
             loading={list.loading}
             {...list.gridProps}
             disableRowSelectionOnClick

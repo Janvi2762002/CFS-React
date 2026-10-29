@@ -1,8 +1,8 @@
-import React, { useState, useMemo } from "react";
+import React, { useState } from "react";
 import {
   Box, Button, Dialog, DialogActions, DialogContent, DialogTitle,
   TextField, Typography, IconButton, useMediaQuery, MenuItem,
-  CircularProgress, Stack, Paper, Divider, Grid, Alert, InputAdornment, Tooltip
+  Stack, Paper, Chip, Divider, Grid, Alert, InputAdornment, Tooltip
 } from "@mui/material";
 import { DataGrid } from "@mui/x-data-grid";
 import EditIcon from "@mui/icons-material/EditOutlined";
@@ -14,9 +14,9 @@ import Inventory2Icon from "@mui/icons-material/Inventory2Outlined";
 import StatTile from "../components/StatTile";
 import ConfirmDialog from "../components/ConfirmDialog";
 import StockItemService from "../services/StockItemService";
-import StockPaymentInfoService from "../services/StockPaymentInfoService";
 import { isConflict } from "../services/apiClient";
-import usePagedList from "../common/usePagedList";
+import usePagedList, { serverSortable } from "../common/usePagedList";
+import useDebouncedValue from "../common/useDebouncedValue";
 import { formatGridDate } from "../components/gridDate";
 import { toLocalDateTime } from "../services/payload";
 import useCreateIntent from "../common/useCreateIntent";
@@ -27,9 +27,17 @@ const LOCKED_MESSAGE =
   "This item's payment is completed, so its amount, party and IN/OUT details can't change and it can't be deleted. " +
   "Reset the payment under Stock Payments first.";
 
-/* Stable references, so the paging hook does not refetch on every render. */
+/* A stable reference, so the paging hook does not refetch on every render. */
 const fetchItemsPage = (p) => StockItemService.getItemsPaginated(p);
-const fetchAllItems = () => StockItemService.getItems();
+
+/* The API sorts by every data column; the field names match its sortBy. */
+const SORT_FIELDS = Object.fromEntries([
+  "no", "inDate", "outDate", "model", "colour", "imei", "partyName", "inOut", "status",
+  "gstMrp", "amount", "payment", "soldTo", "remarks", "paymentStatus",
+].map((f) => [f, f]));
+
+/* The item's payment, as the server keeps it alongside the item. */
+const isCompleted = (item) => item?.paymentStatus === "Completed";
 
 export default function StockItems() {
   const [open,            setOpen]            = useState(false);
@@ -41,15 +49,19 @@ export default function StockItems() {
   const [error,           setError]           = useState("");
   const [formData,        setFormData]        = useState({});
   const [confirm,         setConfirm]         = useState({ open: false, id: null });
-  /* Whether the item being edited has a completed payment, and whether that is still being checked. */
+  /* The item being edited has a completed payment, so its money fields are locked. */
   const [paymentLocked,   setPaymentLocked]   = useState(false);
-  const [checkingPayment, setCheckingPayment] = useState(false);
   const isMobile = useMediaQuery("(max-width:768px)");
 
-  /* The grid pages on the server. Search and the status / IN-OUT filters
-     need every item, so while any is set the full list is paged locally. */
-  const filtering = search.trim() !== "" || statusFilter !== "all" || inOutFilter !== "all";
-  const list = usePagedList({ fetchPage: fetchItemsPage, fetchAll: fetchAllItems, filtering, gridKey: "stockItems" });
+  /* Search, status, IN/OUT and sorting are all done by the API, page by page. */
+  const debouncedSearch = useDebouncedValue(search);
+  const filtering = debouncedSearch.trim() !== "" || statusFilter !== "all" || inOutFilter !== "all";
+  const list = usePagedList({
+    fetchPage: fetchItemsPage,
+    filters: { search: debouncedSearch, status: statusFilter, inOut: inOutFilter },
+    sortFields: SORT_FIELDS,
+    gridKey: "stockItems",
+  });
   const loadItems = list.reload;
 
   const handleOpen = (item = null) => {
@@ -72,14 +84,7 @@ export default function StockItems() {
         remarks: item.remarks || ""
       });
       setIsEditing(true);
-      /* Ask the item's payment whether it is settled, so the money fields
-         can be locked before an edit is refused. */
-      setPaymentLocked(false);
-      setCheckingPayment(true);
-      StockPaymentInfoService.getByStockItem(item.id)
-        .then((payments) => setPaymentLocked(payments.some((pay) => pay.paymentStatus === "Completed")))
-        .catch(() => setPaymentLocked(false)) // the server still refuses a locked change
-        .finally(() => setCheckingPayment(false));
+      setPaymentLocked(isCompleted(item));
     } else {
       setFormData({
         no: "", inDate: toLocalDateTime(new Date()).slice(0, 10), outDate: "",
@@ -88,7 +93,6 @@ export default function StockItems() {
       });
       setIsEditing(false);
       setPaymentLocked(false);
-      setCheckingPayment(false);
     }
     setOpen(true);
   };
@@ -100,7 +104,7 @@ export default function StockItems() {
   const isOut = formData.inOut === "OUT";
   const counterpartyMissing = isOut ? !formData.soldTo?.trim() : !formData.partyName?.trim();
   const canSubmit = formData.no?.trim() && formData.model?.trim() && formData.amount &&
-    !counterpartyMissing && !checkingPayment;
+    !counterpartyMissing;
 
   const handleSave = async () => {
     setSaving(true); setError("");
@@ -124,22 +128,19 @@ export default function StockItems() {
     } finally { setSaving(false); }
   };
 
-  /* Look at the item's payment before asking: a completed one blocks the
-     delete, and a pending one is removed along with the item. */
-  const handleDelete = async (id) => {
+  /* A pending payment is deleted along with its item, so the prompt names
+     it: IN is owed to the supplier, OUT is owed by the buyer. (A completed
+     one can't get here; its Delete button is disabled.) */
+  const handleDelete = (item) => {
     setError("");
-    let payments = [];
-    try {
-      payments = await StockPaymentInfoService.getByStockItem(id);
-    } catch {
-      // Unknown: ask anyway; the server still refuses a locked delete.
-    }
-    if (payments.some((pay) => pay.paymentStatus === "Completed")) {
-      setError(LOCKED_MESSAGE);
-      return;
-    }
-    const pending = payments.find((pay) => pay.paymentStatus === "Pending");
-    setConfirm({ open: true, id, pending });
+    const pending = item.paymentStatus === "Pending"
+      ? {
+          paymentType: item.inOut === "OUT" ? "Receivable" : "Payable",
+          partyName: item.inOut === "OUT" ? item.soldTo : item.partyName,
+          outstandingAmount: item.amount,
+        }
+      : null;
+    setConfirm({ open: true, id: item.id, pending });
   };
 
   const handleDeleteConfirmed = async () => {
@@ -153,22 +154,7 @@ export default function StockItems() {
     }
   };
 
-  /* While searching or filtering, this covers every item, not one page. */
-  const filtered = useMemo(() => {
-    return list.rows.filter((i) => {
-      const q = search.toLowerCase();
-      const matchesSearch =
-        (i.no || "").toLowerCase().includes(q) ||
-        (i.model || "").toLowerCase().includes(q) ||
-        (i.imei || "").toLowerCase().includes(q) ||
-        (i.partyName || "").toLowerCase().includes(q);
-      const matchesStatus = statusFilter === "all" ? true : i.status === statusFilter;
-      const matchesInOut = inOutFilter === "all" ? true : i.inOut === inOutFilter;
-      return matchesSearch && matchesStatus && matchesInOut;
-    });
-  }, [list.rows, search, statusFilter, inOutFilter]);
-
-  const columns = [
+  const columns = serverSortable([
     { field: "no",        headerName: "No.",        width: 100 },
     { field: "inDate",    headerName: "IN Date",    width: 120, valueFormatter: (v) => formatGridDate(v) },
     { field: "outDate",   headerName: "OUT Date",   width: 120, valueFormatter: (v) => formatGridDate(v) },
@@ -182,6 +168,12 @@ export default function StockItems() {
     { field: "amount",    headerName: "Amount",     width: 120, type: "number" },
     { field: "payment",   headerName: "Payment",    width: 110 },
     { field: "soldTo",    headerName: "Sold To",    width: 140 },
+    {
+      field: "paymentStatus", headerName: "Settlement", width: 120,
+      renderCell: (p) => p.value ? (
+        <Chip size="small" variant="outlined" color={p.value === "Completed" ? "success" : "warning"} label={p.value} />
+      ) : "—",
+    },
     { field: "remarks",   headerName: "Remarks",    flex: 1, minWidth: 150 },
     {
       field: "actions", headerName: "Actions", width: 100, sortable: false, align: "right", headerAlign: "right",
@@ -190,15 +182,19 @@ export default function StockItems() {
           <Tooltip title="Edit item">
             <IconButton size="small" onClick={() => handleOpen(p.row)}><EditIcon fontSize="small" /></IconButton>
           </Tooltip>
-          <Tooltip title="Delete item">
-            <IconButton size="small" color="error" onClick={() => handleDelete(p.row.id)}><DeleteIcon fontSize="small" /></IconButton>
+          <Tooltip title={isCompleted(p.row) ? "Payment completed — reset it under Stock Payments to delete" : "Delete item"}>
+            <span>
+              <IconButton size="small" color="error" disabled={isCompleted(p.row)} onClick={() => handleDelete(p.row)}>
+                <DeleteIcon fontSize="small" />
+              </IconButton>
+            </span>
           </Tooltip>
         </Stack>
       ),
     },
-  ];
+  ], SORT_FIELDS);
 
-  const totalAmount = filtered.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+  const totalAmount = list.rows.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
 
   // A module's "New …" button lands here with the Add dialog requested.
   useCreateIntent(() => handleOpen());
@@ -224,8 +220,8 @@ export default function StockItems() {
       </Stack>
 
       <Grid container spacing={2} className="stagger" sx={{ mb: 3 }}>
-        <Grid size={{ xs: 12, sm: 6 }}><StatTile label={filtering ? "Matching Items" : "Total Items"} value={filtering ? filtered.length : list.rowCount} icon={Inventory2Icon} color="primary" /></Grid>
-        <Grid size={{ xs: 12, sm: 6 }}><StatTile label={filtering ? "Matching Total Amount" : "Page Total Amount"} value={`₹${totalAmount.toLocaleString()}`} icon={Inventory2Icon} color="success" /></Grid>
+        <Grid size={{ xs: 12, sm: 6 }}><StatTile label={filtering ? "Matching Items" : "Total Items"} value={list.rowCount} icon={Inventory2Icon} color="primary" /></Grid>
+        <Grid size={{ xs: 12, sm: 6 }}><StatTile label="Page Total Amount" value={`₹${totalAmount.toLocaleString()}`} icon={Inventory2Icon} color="success" /></Grid>
       </Grid>
 
       <Paper variant="outlined" sx={{ overflow: "clip" }}>
@@ -233,7 +229,7 @@ export default function StockItems() {
           <TextField
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by model, IMEI, or party"
+            placeholder="Search no., model, IMEI, party or buyer"
             sx={{ minWidth: { sm: 280 }, flexGrow: 1 }}
             InputProps={{
               startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>,
@@ -261,7 +257,7 @@ export default function StockItems() {
             scrolls instead of the grid clipping rows inside a fixed box. */}
         <Box sx={{ display: "flex", flexDirection: "column" }}>
           <DataGrid
-            rows={filtered}
+            rows={list.rows}
             columns={columns}
             loading={list.loading}
             {...list.gridProps}
@@ -352,7 +348,7 @@ export default function StockItems() {
         <DialogActions sx={{ px: 3, py: 2 }}>
           <Button onClick={() => setOpen(false)}>Cancel</Button>
           <Button variant="contained" disabled={saving || !canSubmit} onClick={isEditing ? handleUpdate : handleSave}>
-            {saving ? "Saving…" : checkingPayment ? "Checking payment…" : isEditing ? "Update Item" : "Create Item"}
+            {saving ? "Saving…" : isEditing ? "Update Item" : "Create Item"}
           </Button>
         </DialogActions>
       </Dialog>

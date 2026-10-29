@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   Box, Button, Dialog, DialogActions, DialogContent, DialogTitle,
   TextField, Typography, IconButton, useMediaQuery, MenuItem,
@@ -17,16 +17,22 @@ import CashLedgerService from "../services/CashLedgerService";
 import { useAuth } from "../common/AuthContext";
 import { formatGridDate } from "../components/gridDate";
 import { toLocalDateTime } from "../services/payload";
-import usePaginationModel from "../common/usePaginationModel";
-import { gridPagerProps } from "../components/GridPager";
+import usePagedList, { serverSortable } from "../common/usePagedList";
+import useDebouncedValue from "../common/useDebouncedValue";
 import useCreateIntent from "../common/useCreateIntent";
+
+/* A stable reference, so the paging hook does not refetch on every render. */
+const fetchEntriesPage = (p) => CashLedgerService.getEntriesPaginated(p);
+
+/* Grid columns the API can sort by (column field → sortBy). */
+const SORT_FIELDS = {
+  transactionDate: "transactionDate", transactionType: "transactionType", name: "name",
+  amount: "amount", remarks: "remarks", createdBy: "createdBy",
+};
 
 export default function CashLedger() {
   const { user } = useAuth();
-  const [entries,         setEntries]         = useState([]);
-  const [paginationModel, setPaginationModel] = usePaginationModel("cashLedger");
   const [totals,          setTotals]          = useState({ opening: 0, in: 0, out: 0, current: 0 });
-  const [loading,         setLoading]         = useState(true);
   const [open,            setOpen]            = useState(false);
   const [isEditing,       setIsEditing]       = useState(false);
   const [search,          setSearch]          = useState("");
@@ -37,34 +43,37 @@ export default function CashLedger() {
   const [confirm,         setConfirm]         = useState({ open: false, id: null });
   const isMobile = useMediaQuery("(max-width:768px)");
 
-  /* /CashLedger takes no paging parameters and always returns every entry,
-     so it is loaded once and the grid pages it locally. Changing the page or
-     page size then costs no request; only a save or delete reloads. */
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    setError("");
+  /* Search, type and sorting are all done by the API, page by page; the
+     server lists newest first unless a column is sorted. */
+  const debouncedSearch = useDebouncedValue(search);
+  const list = usePagedList({
+    fetchPage: fetchEntriesPage,
+    filters: { search: debouncedSearch, transactionType: typeFilter },
+    sortFields: SORT_FIELDS,
+    gridKey: "cashLedger",
+  });
+
+  /* The four totals come from their own summary endpoints, once per change. */
+  const loadTotals = useCallback(async () => {
     try {
-      const [data, op, tin, tout, cur] = await Promise.all([
-        CashLedgerService.getEntriesNewestFirst(),
+      const [op, tin, tout, cur] = await Promise.all([
         CashLedgerService.getOpeningTotal(),
         CashLedgerService.getInTotal(),
         CashLedgerService.getOutTotal(),
         CashLedgerService.getCurrentBalance(),
       ]);
-      setEntries(data || []);
       setTotals({ opening: op || 0, in: tin || 0, out: tout || 0, current: cur || 0 });
     } catch (e) {
-      setEntries([]);
-      setError(e?.message || "Could not load cash ledger data.");
-    } finally { setLoading(false); }
+      setError(e?.message || "Could not load the cash totals.");
+    }
   }, []);
 
-  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => { loadTotals(); }, [loadTotals]);
 
-  /* A new search or type filter starts again from the first page. */
-  useEffect(() => {
-    setPaginationModel((m) => (m.page === 0 ? m : { ...m, page: 0 }));
-  }, [search, typeFilter, setPaginationModel]);
+  const loadData = () => {
+    list.reload();
+    loadTotals();
+  };
 
   const handleOpen = (item = null) => {
     if (item) {
@@ -97,7 +106,7 @@ export default function CashLedger() {
     try {
       await CashLedgerService.saveEntry(formData);
       setOpen(false);
-      await loadData();
+      loadData();
     } catch (e) {
       setError(e?.message || "Could not create entry.");
     } finally { setSaving(false); }
@@ -108,7 +117,7 @@ export default function CashLedger() {
     try {
       await CashLedgerService.updateEntry(formData.id, formData);
       setOpen(false);
-      await loadData();
+      loadData();
     } catch (e) {
       setError(e?.message || "Could not update entry.");
     } finally { setSaving(false); }
@@ -123,23 +132,13 @@ export default function CashLedger() {
     setError("");
     try {
       await CashLedgerService.deleteEntry(id);
-      await loadData();
+      loadData();
     } catch (e) {
       setError(e?.message || "Could not delete entry.");
     }
   };
 
-  /* Search and filter cover the whole ledger. */
-  const filtered = useMemo(() => {
-    return entries.filter((i) => {
-      const q = search.toLowerCase();
-      const matchesSearch = (i.name || "").toLowerCase().includes(q);
-      const matchesType = typeFilter === "all" ? true : i.transactionType === typeFilter;
-      return matchesSearch && matchesType;
-    });
-  }, [entries, search, typeFilter]);
-
-  const columns = [
+  const columns = serverSortable([
     { field: "transactionDate", headerName: "Date",         width: 120, valueFormatter: (v) => formatGridDate(v) },
     { field: "transactionType", headerName: "Type",         width: 120 },
     { field: "name",            headerName: "Name / Party", flex: 1, minWidth: 150 },
@@ -159,7 +158,7 @@ export default function CashLedger() {
         </Stack>
       ),
     },
-  ];
+  ], SORT_FIELDS);
 
   // A module's "New …" button lands here with the Add dialog requested.
   useCreateIntent(() => handleOpen());
@@ -167,6 +166,12 @@ export default function CashLedger() {
   return (
     <Box className="page-enter">
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
+      {list.error && (
+        <Alert severity="error" sx={{ mb: 2 }}
+          action={<Button color="inherit" size="small" onClick={list.reload}>Retry</Button>}>
+          {list.error}
+        </Alert>
+      )}
 
       <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={2} sx={{ mb: 3 }}>
         <Box>
@@ -190,7 +195,7 @@ export default function CashLedger() {
           <TextField
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name"
+            placeholder="Search name or remarks"
             sx={{ minWidth: { sm: 280 }, flexGrow: 1 }}
             InputProps={{
               startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>,
@@ -213,12 +218,10 @@ export default function CashLedger() {
             scrolls instead of the grid clipping rows inside a fixed box. */}
         <Box sx={{ display: "flex", flexDirection: "column" }}>
           <DataGrid
-            rows={filtered}
+            rows={list.rows}
             columns={columns}
-            loading={loading}
-            paginationModel={paginationModel}
-            onPaginationModelChange={setPaginationModel}
-            {...gridPagerProps}
+            loading={list.loading}
+            {...list.gridProps}
             getRowId={(r) => r.id}
             disableRowSelectionOnClick
             localeText={{

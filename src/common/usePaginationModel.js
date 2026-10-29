@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { DEFAULT_PAGE_SIZE } from "../services/paginate";
 
 /** Page sizes offered by every grid's footer. */
-export const PAGE_SIZE_OPTIONS = [10, 25, 50, 100];
+export const PAGE_SIZE_OPTIONS = [5, 10, 25, 50, 100];
 
 const storageKey = (gridKey) => `cfs.pageSize.${gridKey}`;
 

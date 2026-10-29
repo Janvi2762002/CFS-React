@@ -1,5 +1,5 @@
 import apiClient, { unwrap } from "./apiClient";
-import { fetchAllPages, normaliseList, pageParams } from "./paginate";
+import { fetchAllPages, listParams, normaliseList } from "./paginate";
 import { toApiText } from "./payload";
 
 /**
@@ -31,11 +31,18 @@ class BankAccountService {
 
   /**
    * One page of accounts. Returns { data, total, ... }.
-   * @param {{ page?: number, pageSize?: number }} params  — 1-indexed page
+   * `search` matches bank, account name and account number.
+   * @param {{ page?: number, pageSize?: number, search?: string, isActive?: boolean, sortBy?: string, sortDir?: string }} params  — 1-indexed page
    */
-  async getAccountsPaginated({ page = 1, pageSize = 25 } = {}) {
-    const raw = unwrap(await apiClient.get("/BankAccount", { params: pageParams({ page, pageSize }) }));
+  async getAccountsPaginated(opts = {}) {
+    const { page = 1, pageSize = 25 } = opts;
+    const raw = unwrap(await apiClient.get("/BankAccount", { params: listParams(opts) }));
     return normaliseList(raw, page, pageSize);
+  }
+
+  /** Accounts counted by state: { total, active, inactive }. */
+  async getStatusSummary() {
+    return unwrap(await apiClient.get("/BankAccount/summary/status"));
   }
 
   async getAccount(id) {

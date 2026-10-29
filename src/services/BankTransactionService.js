@@ -1,5 +1,5 @@
 import apiClient, { unwrap } from "./apiClient";
-import { fetchAllPages, normaliseList, pageParams } from "./paginate";
+import { fetchAllPages, listParams, normaliseList } from "./paginate";
 import { toApiDate, toApiNumber, toApiText } from "./payload";
 
 /**
@@ -115,12 +115,14 @@ class BankTransactionService {
 
   /**
    * One page of transactions, across all accounts or for one account.
-   * Returns { data, total, ... }.
-   * @param {{ page?: number, pageSize?: number, accountId?: number }} params  — 1-indexed page
+   * Returns { data, total, ... }. `search` matches remarks, reference and
+   * the account names; `transactionType` takes one type or a list of them.
+   * @param {{ page?: number, pageSize?: number, accountId?: number, search?: string, transactionType?: string|string[], sortBy?: string, sortDir?: string }} params  — 1-indexed page
    */
-  async getTransactionsPaginated({ page = 1, pageSize = 25, accountId } = {}) {
+  async getTransactionsPaginated({ accountId, ...opts } = {}) {
+    const { page = 1, pageSize = 25 } = opts;
     const url = accountId == null ? "/BankTransaction" : `/BankTransaction/account/${accountId}`;
-    const raw = unwrap(await apiClient.get(url, { params: pageParams({ page, pageSize }) }));
+    const raw = unwrap(await apiClient.get(url, { params: listParams(opts) }));
     return normaliseList(raw, page, pageSize);
   }
 

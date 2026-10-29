@@ -253,6 +253,10 @@ export default function CardPayments() {
             rowCount={rowCount}
             loading={loading}
             paginationMode="server"
+            /* The API can't sort these lists, and the grid's own sort and
+               column filter would only reorder or filter the page on screen. */
+            disableColumnSorting
+            disableColumnFilter
             paginationModel={paginationModel}
             onPaginationModelChange={setPaginationModel}
             {...gridPagerProps}

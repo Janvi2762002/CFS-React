@@ -1,6 +1,6 @@
 import apiClient, { unwrap } from "./apiClient";
 import { toApiRole, toAppRole } from "./AuthService";
-import { fetchAllPages, normaliseList, pageParams } from "./paginate";
+import { fetchAllPages, listParams, normaliseList, pageParams } from "./paginate";
 import { toApiDate } from "./payload";
 
 /**
@@ -78,12 +78,20 @@ class AdminService {
 
   /**
    * One page of users. Returns { data, total, ... }.
-   * @param {{ page?: number, pageSize?: number }} params  — 1-indexed page
+   * `search` matches full name, username and nickname; `role` is the app's
+   * role ("master" | "admin" | "employee") and is sent as the API's.
+   * @param {{ page?: number, pageSize?: number, search?: string, role?: string, sortBy?: string, sortDir?: string }} params  — 1-indexed page
    */
-  async getUsersPaginated({ page = 1, pageSize = 25 } = {}) {
-    const raw = unwrap(await apiClient.get("/Users", { params: pageParams({ page, pageSize }) }));
+  async getUsersPaginated({ page = 1, pageSize = 25, role, ...rest } = {}) {
+    const params = listParams({ page, pageSize, ...rest, role: role && role !== "all" ? toApiRole(role) : undefined });
+    const raw = unwrap(await apiClient.get("/Users", { params }));
     const list = normaliseList(raw, page, pageSize);
     return { ...list, data: list.data.map(toAppUser) };
+  }
+
+  /** Users counted by role: { total, masters, admins, users }. */
+  async getUsersSummary() {
+    return unwrap(await apiClient.get("/Users/summary"));
   }
 
   async getUserById(userId) {
@@ -106,24 +114,23 @@ class AdminService {
   /* ── CardInfo ────────────────────────────────────────────────────────── */
 
   /**
-   * Fetch every card swipe as a plain array, across all server pages.
-   * Dashboard.jsx and CardSwipes.jsx aggregate and search the whole register.
+   * Every card swipe matching the filters, across all server pages (export).
+   * @param {{ search?: string, isSettled?: boolean, limitUsed?: boolean, sortBy?: string, sortDir?: string }} filters
    */
-  async getCardInfo() {
-    return fetchAllPages(
-      async (params) => unwrap(await apiClient.get("/CardInfo", { params }))
+  async getCardInfo(filters = {}) {
+    return fetchAllPages(async (params) =>
+      unwrap(await apiClient.get("/CardInfo", { params: { ...listParams(filters), ...params } }))
     );
   }
 
   /**
-   * Fetch card swipes with server-side pagination.
-   * Returns { data: [], total: number, next, previous }.
-   * @param {{ page?: number, pageSize?: number }} params  — 1-indexed page
+   * One page of card swipes. Returns { data, total, ... }.
+   * `search` matches party, card number, bank and card name.
+   * @param {{ page?: number, pageSize?: number, search?: string, isSettled?: boolean, limitUsed?: boolean, sortBy?: string, sortDir?: string }} params  — 1-indexed page
    */
-  async getCardInfoPaginated({ page = 1, pageSize = 25 } = {}) {
-    const raw = unwrap(
-      await apiClient.get("/CardInfo", { params: pageParams({ page, pageSize }) })
-    );
+  async getCardInfoPaginated(opts = {}) {
+    const { page = 1, pageSize = 25 } = opts;
+    const raw = unwrap(await apiClient.get("/CardInfo", { params: listParams(opts) }));
     return normaliseList(raw, page, pageSize);
   }
 

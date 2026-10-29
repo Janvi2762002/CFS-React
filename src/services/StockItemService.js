@@ -1,5 +1,5 @@
 import apiClient, { unwrap } from "./apiClient";
-import { fetchAllPages, normaliseList, pageParams, toArray } from "./paginate";
+import { fetchAllPages, listParams, normaliseList, toArray } from "./paginate";
 import { toApiDate, toApiNumber, toApiText } from "./payload";
 
 /** Shape a stock item to the documented StockItem contract. */
@@ -24,22 +24,22 @@ function toApiStockItem(item) {
 }
 
 class StockItemService {
-  /** Fetch every stock item as a plain array, across all server pages. */
-  async getItems() {
-    return fetchAllPages(
-      async (params) => unwrap(await apiClient.get("/StockItem", { params }))
+  /** Every stock item matching the filters, across all server pages. */
+  async getItems(filters = {}) {
+    return fetchAllPages(async (params) =>
+      unwrap(await apiClient.get("/StockItem", { params: { ...listParams(filters), ...params } }))
     );
   }
 
   /**
-   * Fetch stock items with server-side pagination.
-   * Returns { data: [], total: number, next, previous }.
-   * @param {{ page?: number, pageSize?: number }} params  — 1-indexed page
+   * One page of stock items. Returns { data, total, ... }. Each item carries
+   * `paymentStatus` ("Pending" | "Completed") from its stock payment.
+   * `search` matches no., model, IMEI, party and sold-to.
+   * @param {{ page?: number, pageSize?: number, search?: string, status?: string, inOut?: string, sortBy?: string, sortDir?: string }} params  — 1-indexed page
    */
-  async getItemsPaginated({ page = 1, pageSize = 25 } = {}) {
-    const raw = unwrap(
-      await apiClient.get("/StockItem", { params: pageParams({ page, pageSize }) })
-    );
+  async getItemsPaginated(opts = {}) {
+    const { page = 1, pageSize = 25 } = opts;
+    const raw = unwrap(await apiClient.get("/StockItem", { params: listParams(opts) }));
     return normaliseList(raw, page, pageSize);
   }
 

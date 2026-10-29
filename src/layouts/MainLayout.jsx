@@ -6,7 +6,7 @@ import NavRail from "./parts/NavRail";
 import ModulePanel from "./parts/ModulePanel";
 import MobileNav, { MOBILE_NAV_HEIGHT } from "./parts/MobileNav";
 import Topbar from "./parts/Topbar";
-import { modulesFor, findRoute } from "./nav";
+import { modulesFor, findRoute, canReadDashboard } from "./nav";
 import { PANEL_WIDTH } from "../theme/theme";
 import { useAuth } from "../common/AuthContext";
 import useDashboardSummary from "../common/useDashboardSummary";
@@ -43,11 +43,11 @@ export default function MainLayout() {
   const [sheetOpen, setSheetOpen] = useState(false);
   useEffect(() => { setSheetOpen(false); }, [pathname, isPhone]);
 
-  /* Module figures come from the dashboard summary, which only the Master
-     may see. Refreshed on every page change so they track new entries; a
+  /* Module figures come from the dashboard summary, which only Admin and
+     Master may read. Refreshed on every page change so they track new entries; a
      failure keeps the last figures, or none. The Dashboard page reads the
      same response through the Outlet context instead of fetching it again. */
-  const dashboard = useDashboardSummary(userRole === "master");
+  const dashboard = useDashboardSummary(canReadDashboard(userRole));
   const refreshSummary = dashboard.refresh;
   useEffect(() => { refreshSummary(); }, [refreshSummary, pathname]);
   const summary = dashboard.data;

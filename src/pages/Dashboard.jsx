@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
 import {
   Alert, Box, Button, CircularProgress, Grid, Paper, Skeleton, Stack, Tooltip, Typography,
@@ -10,12 +10,16 @@ import CallReceivedIcon from "@mui/icons-material/CallReceived";
 import CallMadeIcon from "@mui/icons-material/CallMade";
 import WarningAmberRoundedIcon from "@mui/icons-material/WarningAmberRounded";
 import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
+import { BarChart } from "@mui/x-charts/BarChart";
+import DashboardService from "../services/DashboardService";
 
 /* ─── Overview board ───────────────────────────────────────────────────────
-   Everything on this page comes from one response, GET /Dashboard/summary,
-   which MainLayout fetches and shares through the Outlet context (the
-   module rail shows the same figures). Three figures are worked out here
-   from that response: total capital, net pending and stock available %.
+   The headline cards come from GET /Dashboard/summary, which MainLayout
+   fetches and shares through the Outlet context (the module rail shows the
+   same figures). Total capital, net position and stock available % come
+   from the API too; they are only worked out here if a field is missing.
+   The charts below read three more endpoints: monthly-flow, swipes-daily
+   and top-parties, fetched by this page and refreshed with it.
    Spec: docs/dashboard-overview-layout-a.md */
 
 /* A missing or non-numeric field is shown as "–", never as 0. */
@@ -52,7 +56,7 @@ const pct = (part, whole) => (whole > 0 ? (part / whole) * 100 : 0);
 
 function Card({ children, sx }) {
   return (
-    <Paper variant="outlined" sx={{ p: { xs: 2, sm: 2.5 }, height: "100%", display: "flex", flexDirection: "column", gap: 2, ...sx }}>
+    <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2 }, height: "100%", display: "flex", flexDirection: "column", gap: 1.5, ...sx }}>
       {children}
     </Paper>
   );
@@ -89,9 +93,9 @@ function CardHeader({ title, sub, to, linkLabel }) {
 
 function Tile({ label, value, caption }) {
   return (
-    <Box sx={{ border: 1, borderColor: "divider", borderRadius: 3, px: 1.75, py: 1.5, minWidth: 0 }}>
+    <Box sx={{ border: 1, borderColor: "divider", borderRadius: 3, px: 1.5, py: 1, minWidth: 0 }}>
       <Eyebrow>{label}</Eyebrow>
-      <Typography className="tabular-nums" sx={{ fontSize: "1.375rem", fontWeight: 600, letterSpacing: "-0.01em", lineHeight: 1.3 }}>
+      <Typography className="tabular-nums" sx={{ fontSize: "1.2rem", fontWeight: 600, letterSpacing: "-0.01em", lineHeight: 1.3 }}>
         {value}
       </Typography>
       {caption && <Typography variant="caption" color="text.secondary">{caption}</Typography>}
@@ -115,7 +119,7 @@ function SplitBar({ parts, label }) {
   return (
     <Stack spacing={1.25}>
       {total > 0 && (
-        <Stack direction="row" spacing="2px" sx={{ height: 20 }} role="img" aria-label={label}>
+        <Stack direction="row" spacing="2px" sx={{ height: 16 }} role="img" aria-label={label}>
           {drawn.map((p, i) => (
             <Tooltip key={p.name} title={`${p.name}: ${inr(p.value)} · ${pct(p.value, total).toFixed(1)}%`} arrow>
               <Box
@@ -190,7 +194,7 @@ function HBarChart({ rows, label }) {
             </Box>
             <Box
               sx={{
-                position: "relative", minHeight: 36, mr: `${LABEL_ROOM}px`,
+                position: "relative", minHeight: 30, mr: `${LABEL_ROOM}px`,
                 backgroundImage: `linear-gradient(to right, ${theme.palette.chart.grid} 1px, transparent 1px)`,
                 backgroundSize: "25% 100%",
                 borderRight: `1px solid ${theme.palette.chart.grid}`,
@@ -202,7 +206,7 @@ function HBarChart({ rows, label }) {
                     tabIndex={0}
                     sx={{
                       position: "absolute", left: 0, top: "50%", transform: "translateY(-50%)",
-                      height: 20, width: `${w}%`, minWidth: 2, bgcolor: r.color,
+                      height: 16, width: `${w}%`, minWidth: 2, bgcolor: r.color,
                       borderRadius: "0 4px 4px 0",
                       "&:hover, &:focus-visible": { filter: "brightness(1.08)" },
                     }}
@@ -243,13 +247,13 @@ function HBarChart({ rows, label }) {
 
 /* ── Cards ───────────────────────────────────────────────────────────── */
 
-function CapitalCard({ bank, cash }) {
+function CapitalCard({ bank, cash, total }) {
   const theme = useTheme();
-  // Calculated here: bank + cash.
-  const capital = bank == null && cash == null ? null : (bank ?? 0) + (cash ?? 0);
+  // From the API; bank + cash only if it didn't send totalCapital.
+  const capital = total ?? (bank == null && cash == null ? null : (bank ?? 0) + (cash ?? 0));
 
   return (
-    <Card sx={{ p: { xs: 2, sm: 3 } }}>
+    <Card sx={{ p: { xs: 1.5, sm: 2.25 } }}>
       <Box>
         <Eyebrow>Total capital</Eyebrow>
         <Typography variant="caption" color="text.secondary">Money in bank accounts and cash in hand</Typography>
@@ -257,7 +261,7 @@ function CapitalCard({ bank, cash }) {
       <Typography
         component="p"
         className="tabular-nums"
-        sx={{ fontSize: { xs: "2.25rem", sm: "3rem" }, fontWeight: 600, letterSpacing: "-0.025em", lineHeight: 1.05 }}
+        sx={{ fontSize: { xs: "1.5rem", sm: "1.75rem" }, fontWeight: 600, letterSpacing: "-0.02em", lineHeight: 1.15 }}
       >
         {inr(capital)}
       </Typography>
@@ -272,9 +276,10 @@ function CapitalCard({ bank, cash }) {
   );
 }
 
-function StockCard({ available, total, value }) {
-  // Calculated here: available ÷ total.
-  const share = total > 0 && available != null ? available / total : null;
+function StockCard({ available, total, value, pct: availablePct }) {
+  // From the API (a percentage); available ÷ total only if it's missing.
+  const share = availablePct != null ? availablePct / 100
+    : total > 0 && available != null ? available / total : null;
 
   return (
     <Card>
@@ -283,7 +288,7 @@ function StockCard({ available, total, value }) {
         <Typography variant="body2" color="text.secondary">No stock recorded yet.</Typography>
       ) : (
         <>
-          <Typography className="tabular-nums" sx={{ fontSize: "1.75rem", fontWeight: 600, letterSpacing: "-0.015em", lineHeight: 1.2 }}>
+          <Typography className="tabular-nums" sx={{ fontSize: "1.5rem", fontWeight: 600, letterSpacing: "-0.015em", lineHeight: 1.2 }}>
             {count(available)}{" "}
             <Typography component="span" variant="body2" color="text.secondary">of {count(total)} items</Typography>
           </Typography>
@@ -291,7 +296,7 @@ function StockCard({ available, total, value }) {
             <Stack spacing={0.75}>
               <Meter value={share} label={`${count(available)} of ${count(total)} items available`} />
               <Typography variant="caption" color="text.secondary">
-                {Math.round(share * 100)}% of stock is still available
+                {+(share * 100).toFixed(1)}% of stock is still available
               </Typography>
             </Stack>
           )}
@@ -302,10 +307,10 @@ function StockCard({ available, total, value }) {
   );
 }
 
-function PendingCard({ receivable, payable, parties }) {
+function PendingCard({ receivable, payable, parties, net: apiNet }) {
   const theme = useTheme();
-  // Calculated here: what you're owed minus what you owe.
-  const net = receivable != null && payable != null && parties != null ? receivable - (payable + parties) : null;
+  // From the API (owed to you minus what you owe); worked out only if missing.
+  const net = apiNet ?? (receivable != null && payable != null && parties != null ? receivable - (payable + parties) : null);
   const owe = net != null && net < 0;
   const tone = owe ? theme.palette.warning : theme.palette.success;
   const NetIcon = owe ? WarningAmberRoundedIcon : CheckCircleOutlineIcon;
@@ -363,6 +368,186 @@ function SwipesCard({ swipes, profit, parties }) {
   );
 }
 
+/* ── Cards fed by the chart endpoints ──────────────────────────────── */
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** "2026-09" → "Sep 26". */
+const monthLabel = (ym) => {
+  const [y, m] = String(ym).split("-");
+  return MONTHS[Number(m) - 1] ? `${MONTHS[Number(m) - 1]} ${String(y).slice(2)}` : ym;
+};
+/** "2026-10-27" → "27 Oct". */
+const dayLabel = (ymd) => {
+  const [, m, d] = String(ymd).split("-");
+  return MONTHS[Number(m) - 1] ? `${Number(d)} ${MONTHS[Number(m) - 1]}` : ymd;
+};
+
+/* Shared chart look: the theme's chart grid colour and readable ticks. */
+function useChartSx() {
+  const theme = useTheme();
+  return {
+    "& .MuiChartsGrid-line": { stroke: theme.palette.chart.grid },
+    "& .MuiChartsAxis-line, & .MuiChartsAxis-tick": { stroke: theme.palette.divider },
+    "& .MuiChartsAxis-tickLabel": { fill: theme.palette.text.secondary },
+  };
+}
+
+function ChartMessage({ loading, error, empty, emptyText }) {
+  if (loading) return <Skeleton variant="rounded" height={180} />;
+  if (error) return <Typography variant="body2" color="text.secondary">Couldn't load this chart: {error}</Typography>;
+  if (empty) return <Typography variant="body2" color="text.secondary">{emptyText}</Typography>;
+  return null;
+}
+
+/**
+ * Money in vs out per month. Bank and cash stack inside each bar, so a bar's
+ * height is everything that came in (or went out) that month.
+ */
+function MonthlyFlowCard({ rows, loading, error }) {
+  const theme = useTheme();
+  const sx = useChartSx();
+  const c = theme.palette.chart;
+  const empty = !rows?.some((r) => r.bankIn || r.bankOut || r.cashIn || r.cashOut);
+  const series = (key, label, stack, color) => ({
+    data: (rows || []).map((r) => num(r[key]) ?? 0), label, stack, color, valueFormatter: (v) => inr(v),
+  });
+
+  return (
+    <Card>
+      <CardHeader title="Money in and out" sub="Bank and cash, last 12 months" to="/bank-transactions" linkLabel="Bank" />
+      {loading || error || empty ? (
+        <ChartMessage loading={loading} error={error} empty={empty} emptyText="No money movements in the last 12 months." />
+      ) : (
+        <BarChart
+          height={230}
+          sx={sx}
+          grid={{ horizontal: true }}
+          xAxis={[{ scaleType: "band", data: rows.map((r) => monthLabel(r.month)) }]}
+          yAxis={[{ width: 64, valueFormatter: (v) => lakh(v) }]}
+          series={[
+            series("bankIn", "Bank in", "in", c.bank),
+            series("cashIn", "Cash in", "in", c.cash),
+            series("bankOut", "Bank out", "out", c.owe),
+            series("cashOut", "Cash out", "out", alpha(c.owe, 0.55)),
+          ]}
+          margin={{ top: 8, right: 8, bottom: 8, left: 8 }}
+          slotProps={{ legend: { position: { vertical: "bottom", horizontal: "center" } } }}
+        />
+      )}
+    </Card>
+  );
+}
+
+/** Swipe amount per day, with the count and profit in the tooltip. */
+function SwipesDailyCard({ rows, loading, error }) {
+  const theme = useTheme();
+  const sx = useChartSx();
+  const empty = !rows?.some((r) => r.count);
+  const total = (rows || []).reduce((a, r) => a + (num(r.amount) ?? 0), 0);
+  const swipes = (rows || []).reduce((a, r) => a + (num(r.count) ?? 0), 0);
+
+  return (
+    <Card>
+      <CardHeader title="Swipes per day" sub={`Last 30 days · ${count(swipes)} swipes · ${inr(total)}`} to="/swipes" linkLabel="Cards" />
+      {loading || error || empty ? (
+        <ChartMessage loading={loading} error={error} empty={empty} emptyText="No swipes in the last 30 days." />
+      ) : (
+        <BarChart
+          height={200}
+          sx={sx}
+          grid={{ horizontal: true }}
+          hideLegend
+          xAxis={[{
+            scaleType: "band",
+            data: rows.map((r) => dayLabel(r.date)),
+            // A label every few days keeps 30 bars readable.
+            tickLabelInterval: (_, i) => i % 5 === 0 || i === rows.length - 1,
+          }]}
+          yAxis={[{ width: 64, valueFormatter: (v) => lakh(v) }]}
+          series={[{
+            data: rows.map((r) => num(r.amount) ?? 0),
+            label: "Swipe amount",
+            color: theme.palette.chart.bank,
+            valueFormatter: (v, { dataIndex }) =>
+              `${inr(v)} · ${count(num(rows[dataIndex]?.count) ?? 0)} swipes · ${inr(num(rows[dataIndex]?.profit))} profit`,
+          }]}
+          margin={{ top: 8, right: 8, bottom: 8, left: 8 }}
+        />
+      )}
+    </Card>
+  );
+}
+
+/** The parties you owe the most: card parties and stock suppliers together. */
+function TopPartiesCard({ rows, loading, error }) {
+  const theme = useTheme();
+  const empty = !rows?.length;
+  return (
+    <Card>
+      <CardHeader title="Parties you owe the most" sub="Card parties and stock suppliers" />
+      {loading || error || empty ? (
+        <ChartMessage loading={loading} error={error} empty={empty} emptyText="You don't owe any party right now." />
+      ) : (
+        <HBarChart
+          label="Pending amount by party"
+          rows={rows.map((r) => ({
+            name: r.partyName || "Unnamed party",
+            note: r.type === "Supplier" ? "Stock supplier" : "Card party",
+            value: num(r.pending),
+            color: theme.palette.chart.owe,
+          }))}
+        />
+      )}
+    </Card>
+  );
+}
+
+/** Each bank account's current balance, from the summary's `accounts`. */
+function AccountsCard({ accounts }) {
+  const theme = useTheme();
+  const rows = (accounts || [])
+    .map((a) => ({ name: [a.bankName, a.accountName].filter(Boolean).join(" · ") || `Account #${a.accountId}`, value: num(a.currentBalance) }))
+    .sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
+  return (
+    <Card>
+      <CardHeader title="Balance by account" sub="Current balance of each bank account" to="/bank-accounts" linkLabel="Accounts" />
+      {rows.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">No bank accounts yet.</Typography>
+      ) : (
+        <HBarChart
+          label="Current balance by bank account"
+          rows={rows.map((r) => ({ ...r, color: theme.palette.chart.bank }))}
+        />
+      )}
+    </Card>
+  );
+}
+
+/* GET monthly-flow, swipes-daily and top-parties, loaded together. */
+const EMPTY_CHARTS = { flow: null, daily: null, top: null, loading: true, error: "" };
+
+function useDashboardCharts() {
+  const [charts, setCharts] = useState(EMPTY_CHARTS);
+  const load = useCallback(async () => {
+    setCharts((c) => ({ ...c, loading: true, error: "" }));
+    const [flow, daily, top] = await Promise.allSettled([
+      DashboardService.getMonthlyFlow(12),
+      DashboardService.getSwipesDaily(30),
+      DashboardService.getTopParties(5),
+    ]);
+    const fail = [flow, daily, top].find((r) => r.status === "rejected");
+    setCharts({
+      flow: flow.status === "fulfilled" ? flow.value : null,
+      daily: daily.status === "fulfilled" ? daily.value : null,
+      top: top.status === "fulfilled" ? top.value : null,
+      loading: false,
+      error: fail ? fail.reason?.message || "Could not load the chart." : "",
+    });
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  return { ...charts, reload: load };
+}
+
 /* ── Page ────────────────────────────────────────────────────────────── */
 
 function BoardSkeleton() {
@@ -371,7 +556,7 @@ function BoardSkeleton() {
     <Grid container spacing={2} aria-busy="true" aria-label="Loading the dashboard">
       {sizes.map((md, i) => (
         <Grid key={i} size={{ xs: 12, md }}>
-          <Skeleton variant="rounded" height={i < 2 ? 220 : 260} sx={{ borderRadius: 4 }} />
+          <Skeleton variant="rounded" height={i < 2 ? 180 : 210} sx={{ borderRadius: 4 }} />
         </Grid>
       ))}
     </Grid>
@@ -383,6 +568,13 @@ const timeOf = (d) => d?.toLocaleTimeString("en-IN", { hour: "numeric", minute: 
 export default function Dashboard() {
   const { dashboard } = useOutletContext() || {};
   const { data, loading = false, error = "", updatedAt = null, refresh } = dashboard || {};
+  const charts = useDashboardCharts();
+  const refreshAll = () => {
+    refresh?.();
+    charts.reload();
+  };
+  // Each chart shows its own error; a failed one doesn't hide the others.
+  const chartError = (part) => (charts[part] == null && !charts.loading ? charts.error : "");
 
   const s = data
     ? {
@@ -396,6 +588,10 @@ export default function Dashboard() {
         stockValue: num(data.availableStockValue),
         payable: num(data.pendingStockPayable),
         receivable: num(data.pendingStockReceivable),
+        capital: num(data.totalCapital),
+        net: num(data.netPosition),
+        stockPct: num(data.stockAvailablePct),
+        accounts: Array.isArray(data.accounts) ? data.accounts : [],
       }
     : null;
 
@@ -411,7 +607,7 @@ export default function Dashboard() {
         <Button
           variant="outlined"
           size="small"
-          onClick={() => refresh?.()}
+          onClick={refreshAll}
           disabled={loading || !refresh}
           startIcon={loading && data ? <CircularProgress size={14} /> : <RefreshIcon fontSize="small" />}
         >
@@ -430,7 +626,7 @@ export default function Dashboard() {
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             {error || "The summary came back empty."}
           </Typography>
-          <Button variant="contained" onClick={() => refresh?.()} disabled={!refresh}>Try again</Button>
+          <Button variant="contained" onClick={refreshAll} disabled={!refresh}>Try again</Button>
         </Paper>
       )}
 
@@ -441,18 +637,30 @@ export default function Dashboard() {
               Couldn't refresh: {error} Showing the figures from {timeOf(updatedAt) || "earlier"}.
             </Alert>
           )}
-          <Grid container spacing={2} className="stagger">
+          <Grid container spacing={1.5} className="stagger">
             <Grid size={{ xs: 12, md: 7 }}>
-              <CapitalCard bank={s.bank} cash={s.cash} />
+              <CapitalCard bank={s.bank} cash={s.cash} total={s.capital} />
             </Grid>
             <Grid size={{ xs: 12, md: 5 }}>
-              <StockCard available={s.stockAvailable} total={s.stockTotal} value={s.stockValue} />
+              <StockCard available={s.stockAvailable} total={s.stockTotal} value={s.stockValue} pct={s.stockPct} />
             </Grid>
             <Grid size={{ xs: 12, md: 7 }}>
-              <PendingCard receivable={s.receivable} payable={s.payable} parties={s.parties} />
+              <PendingCard receivable={s.receivable} payable={s.payable} parties={s.parties} net={s.net} />
             </Grid>
             <Grid size={{ xs: 12, md: 5 }}>
               <SwipesCard swipes={s.swipes} profit={s.profit} parties={s.parties} />
+            </Grid>
+            <Grid size={12}>
+              <MonthlyFlowCard rows={charts.flow} loading={charts.loading} error={chartError("flow")} />
+            </Grid>
+            <Grid size={{ xs: 12, md: 7 }}>
+              <SwipesDailyCard rows={charts.daily} loading={charts.loading} error={chartError("daily")} />
+            </Grid>
+            <Grid size={{ xs: 12, md: 5 }}>
+              <TopPartiesCard rows={charts.top} loading={charts.loading} error={chartError("top")} />
+            </Grid>
+            <Grid size={12}>
+              <AccountsCard accounts={s.accounts} />
             </Grid>
           </Grid>
         </>

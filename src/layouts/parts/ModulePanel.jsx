@@ -10,6 +10,7 @@ import KeyboardDoubleArrowLeftIcon from "@mui/icons-material/KeyboardDoubleArrow
 import CloseIcon from "@mui/icons-material/Close";
 import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import { useAuth } from "../../common/AuthContext";
+import { canReadDashboard } from "../nav";
 
 /**
  * One module's pages, its headline figure and its main action. Shown beside
@@ -26,7 +27,7 @@ export default function ModulePanel({ module, summary, onHide, onClose, onNaviga
   const location = useLocation();
   const navigate = useNavigate();
 
-  const isMaster = userRole === "master";
+  const dashboardAllowed = canReadDashboard(userRole);
   const figure = summary ? module.figure?.(summary) : null;
 
   const isActive = (path) =>
@@ -103,7 +104,7 @@ export default function ModulePanel({ module, summary, onHide, onClose, onNaviga
       >
         {module.pages.map((page) => {
           const active = isActive(page.path);
-          const locked = page.masterOnly && !isMaster;
+          const locked = page.needsDashboard && !dashboardAllowed;
           return (
             <ListItemButton
               key={page.path}
@@ -118,10 +119,11 @@ export default function ModulePanel({ module, summary, onHide, onClose, onNaviga
             >
               <ListItemText
                 primary={page.label}
-                secondary={locked ? "Master administrators only" : page.sub}
+                secondary={locked ? "Admins and Master only" : page.sub}
                 slotProps={{
                   primary: { sx: { fontSize: "0.875rem", fontWeight: 500 } },
-                  secondary: { noWrap: true, sx: { fontSize: "0.75rem" } },
+                  // Wraps rather than cutting off, so the whole description reads on any width.
+                  secondary: { sx: { fontSize: "0.75rem", lineHeight: 1.35, mt: 0.25 } },
                 }}
                 sx={{ my: 0, ...(locked && { color: "text.disabled" }) }}
               />
