@@ -16,7 +16,6 @@ dist*
 *.zip
 dist.zip
 build.zip
-public/
 
 # misc & cache
 .DS_Store
